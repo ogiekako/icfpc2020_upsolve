@@ -1,0 +1,45 @@
+// t     2
+
+// add  2
+// div  2
+// mul   2
+// neg   1
+// lt    2
+
+// ap   ap
+
+// s    3
+// c    3
+// b    3
+
+// eq   2
+
+// i    1
+// cons 3
+// car  1
+// cdr  1
+// nil   1
+// isnil 1
+
+// galaxy
+
+ap ap f38 x2 x0 = ap ap ap if0 ap car x0 ( ap modem ap car ap cdr x0 , ap multipledraw ap car ap cdr ap cdr x0 ) ap ap ap interact x2 ap modem ap car ap cdr x0 ap send ap car ap cdr ap cdr x0
+
+ap ap ap interact x2 x4 x3 = ap ap f38 x2 ap ap x2 x4 x3
+
+
+
+checkerboard = ap ap s ap ap b s ap ap c ap ap b c ap ap b ap c ap c ap ap s ap ap b s ap ap b ap b ap ap s i i lt eq ap ap s mul i nil ap ap s ap ap b s ap ap b ap b cons ap ap s ap ap b s ap ap b ap b cons ap c div ap c ap ap s ap ap b b ap ap c ap ap b b add neg ap ap b ap s mul div ap ap c ap ap b b checkerboard ap ap c add 2
+
+
+(cons
+    (ap (ap (ap (ap s 
+        (ap (ap b s) (ap (ap b (ap b cons)) (ap c div)))
+    ) (ap c (ap (ap s (ap (ap b b) (ap (ap c (ap (ap b b) add)) neg))) (ap (ap b (ap s mul)) div)))) 7) 0)
+    (ap (ap (ap (ap c (ap (ap b b) checkerboard)) (ap (ap c add) 2)) 7) 0)
+)
+
+ap ap f38 x2 x0 = ap ap
+    ap if0
+        ap car x0
+    ( ap car ap cdr x0 , ap multipledraw ap car ap cdr ap cdr x0 ) ap ap ap interact x2 ap modem ap car ap cdr x0 ap send ap car ap cdr ap cdr x0
