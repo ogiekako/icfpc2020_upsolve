@@ -4,10 +4,19 @@ version = "0.1.0"
 authors = ["Keigo Oka <ogiekako@gmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
 
 [dependencies]
 itertools = "0.9.0"
 anyhow = "1.0.31"
 lazy_static = "1.4.0"
 im-rc = "15.0.0"
+
+wasm-bindgen = {version="0.2.65", features = ["serde-serialize"]}
+console_error_panic_hook = { version = "0.1.6", optional = true }
+
+serde = {version="1.0.114", features = ["derive"] }

@@ -1,12 +1,8 @@
 #![allow(unused)]
 
-extern crate anyhow;
-extern crate itertools;
-#[macro_use]
-extern crate lazy_static;
-extern crate im_rc;
-// extern crate im;
 extern crate interpreter;
+
+extern crate console_error_panic_hook;
 
 use interpreter::*;
 
@@ -21,14 +17,24 @@ fn main() {
     child.join().unwrap();
 }
 
+fn galaxy(input: &str) -> String {
+    format!("ap ap ap interact galaxy {} ap ap vec 1000 1000", input)
+}
+
 fn run() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+
     let mut input = String::new();
 
     std::io::stdin().read_to_string(&mut input);
     if input.is_empty() {
-        input = "ap ap ap interact galaxy nil ap ap vec 0 0".into();
+        input = galaxy("nil");
+        input = galaxy(
+            "ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil",
+        );
+    } else {
+        input = galaxy(&input.trim());
     }
-    let input = input.trim();
 
     let mut env = default_env();
 
