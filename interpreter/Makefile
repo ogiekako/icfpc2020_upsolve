@@ -1,7 +1,7 @@
 build:
-	wasm-pack build
+	wasm-pack build --release
 
-run:
+run: build
 	cd www; \
 	npx webpack-dev-server --host 0.0.0.0
 

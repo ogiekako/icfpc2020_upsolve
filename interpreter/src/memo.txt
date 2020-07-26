@@ -56,3 +56,29 @@ cons
             cons <image>
                 cons <image> nil
         nil
+
+
+add
+ap
+b
+c
+car
+cdr
+cons
+div
+eq
+i
+isnil
+lt
+mul
+neg
+nil
+s
+send
+t
+
+
+以下の共通部分が見られる．
+
+ap ap ap c :1141 7 ap ap cons 2 ap ap ap ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 :1115 ap ap b ap b ap c ap ap b b cons ap ap b c ap ap b ap c ap ap c ap ap b b b ap ap s ap ap b s ap ap b ap b b ap ap b ap b s ap ap c ap ap b b ap ap b b ap eq 0 cons ap ap b ap b ap c ap ap b b :1115 ap ap b c ap ap b ap c :1144 ap add -1 ap add -1 ap add -1 ap add -1 ap add -1 ap add -1 ap add -1 ap add -1 7 ap ap ap c ap ap c b ap ap s ap ap b c ap ap b ap b b ap eq 0 ap ap b ap c ap ap c b ap ap s ap ap b c ap ap b ap b b ap eq 0 ap ap b ap c :1141 ap add -1 ap add -1 1 ap send ap car ap ap cons ap ap cons 0 nil nil ap ap cons 0 ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons 0 nil
+

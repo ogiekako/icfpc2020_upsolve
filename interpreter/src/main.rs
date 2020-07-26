@@ -2,7 +2,7 @@
 
 extern crate interpreter;
 
-extern crate console_error_panic_hook;
+// extern crate clap;
 
 use interpreter::*;
 
@@ -18,11 +18,27 @@ fn main() {
 }
 
 fn galaxy(input: &str) -> String {
-    format!("ap ap ap interact galaxy {} ap ap vec 1000 1000", input)
+    format!("ap ap ap interact galaxy {} ap ap vec 0 0", input)
 }
 
 fn run() {
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    {
+        // let state = "ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons -1 nil ap ap cons 0 ap ap cons nil nil";
+        let state = "ap ap cons 5 ap ap cons ap ap cons 2 ap ap cons 0 ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil";
+        let (next_state, images) = interpreter::galaxy(state.into(), (0, 0));
+        eprintln!("finished computing galaxy: {} {:?}", next_state, images);
+
+        return;
+    }
+
+    // let matches = clap::App::new("interpreter")
+    //     .arg(
+    //         clap::Arg::with_name("piston")
+    //             .short("p")
+    //             .long("piston")
+    //             .help("Use piston game engine"),
+    //     )
+    //     .get_matches();
 
     let mut input = String::new();
 
