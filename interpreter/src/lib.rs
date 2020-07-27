@@ -55,7 +55,7 @@ impl Expr {
         }
     }
     fn must_list_rev(&self, env: &Env) -> Vec<Expr> {
-        let e = self.eval(env).expr;
+        let e = self.eval(env);
         match e.must_op() {
             ("nil", []) => vec![],
             ("cons", [x0, x1]) => {
@@ -70,11 +70,11 @@ impl Expr {
         self.must_list_rev(env).into_iter().rev().collect()
     }
     fn must_point(&self, env: &Env) -> (i64, i64) {
-        let e = self.eval(env).expr;
+        let e = self.eval(env);
         match e.must_op() {
             ("cons", [x, y]) => {
-                let x = x.eval(env).expr;
-                let y = y.eval(env).expr;
+                let x = x.eval(env);
+                let y = y.eval(env);
                 (x.must_num(), y.must_num())
             }
             _ => panic!("not vec: {}", self),
@@ -92,7 +92,7 @@ impl Expr {
     }
 
     fn modulate(&self, env: &Env) -> String {
-        let e = self.eval(env).expr;
+        let e = self.eval(env);
 
         match e {
             Num(n) => {
@@ -158,7 +158,7 @@ impl Expr {
     }
 
     pub fn reduce(&self, env: &Env) -> Expr {
-        let x = self.eval(env).expr;
+        let x = self.eval(env);
         // eprintln!("result before reduce: {}", x);
         match x {
             Op(s, v) => Op(s, v.iter().map(|e| e.expr.borrow().reduce(env).into()).collect()),
@@ -167,19 +167,15 @@ impl Expr {
         }
     }
 
-    pub fn eval(&self, env: &Env) -> EvalResult {
-        self.eval2(env, false)
-    }
-
-    fn eval2(&self, env: &Env, dump: bool) -> EvalResult {
+    pub fn eval(&self, env: &Env) -> Expr {
         let ap = |x: &CachedExpr, y: &CachedExpr| Ap(x.clone(), y.clone());
         let t = Op("t".to_string(), vec![]);
         let f = Op("f".to_string(), vec![]);
         let bb = |b| if b { t.clone() } else { f.clone() };
 
         match self {
-            Ap(l, r) => l.eval(env).then(|l| {
-                let e = match l {
+            Ap(l, r) => {
+                let e = match l.eval(env) {
                     Op(name, v) => {
                         let mut v = v.clone();
                         v.push(r.clone());
@@ -187,54 +183,54 @@ impl Expr {
                     }
                     _ => panic!("not op or func l: {:?}", l),
                 };
-                e.eval2(env, dump)
-            }),
-            Var(name) => env.get(name).unwrap().eval2(env, dump),
+                e.eval(env)
+            }
+            Var(name) => env.get(name).unwrap().eval(env),
             Op(name, v) => match (name.as_str(), &v.as_slice()) {
-                ("add", [x, y]) => x.eval(env).then(|x| y.eval(env).then(|y| EvalResult::new(Num(x.must_num() + y.must_num()), true))),
-                ("mul", [x, y]) => x.eval(env).then(|x| y.eval(env).then(|y| EvalResult::new(Num(x.must_num() * y.must_num()), true))),
-                ("div", [x, y]) => x.eval(env).then(|x| y.eval(env).then(|y| EvalResult::new(Num(x.must_num() / y.must_num()), true))),
-                ("eq", [x, y]) => x.eval(env).then(|x| y.eval(env).then(|y| EvalResult::new(bb(x.must_num() == y.must_num()), true))),
-                ("lt", [x, y]) => x.eval(env).then(|x| y.eval(env).then(|y| EvalResult::new(bb(x.must_num() < y.must_num()), true))),
-                ("neg", [x]) => x.eval(env).then(|x| EvalResult::new(Num(-x.must_num()), true)),
+                ("add", [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
+                ("mul", [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
+                ("div", [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
+                ("eq", [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
+                ("lt", [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
+                ("neg", [x]) => Num(-x.eval(env).must_num()),
 
                 ("s", [x0, x1, x2]) => {
                     //
-                    ap(&ap(x0, x2).into(), &ap(x1, x2).into()).eval2(env, dump)
+                    ap(&ap(x0, x2).into(), &ap(x1, x2).into()).eval(env)
                 }
                 ("c", [x0, x1, x2]) => {
                     //
-                    ap(&ap(x0, x2).into(), x1).eval2(env, dump)
+                    ap(&ap(x0, x2).into(), x1).eval(env)
                 }
                 ("b", [x0, x1, x2]) => {
                     //
-                    ap(x0, &ap(x1, x2).into()).eval2(env, dump)
+                    ap(x0, &ap(x1, x2).into()).eval(env)
                 }
 
-                ("i", [x0]) => x0.eval2(env, dump),
+                ("i", [x0]) => x0.eval(env),
 
-                ("f", [x0, x1]) => x1.eval2(env, dump),
-                ("t", [x0, x1]) => x0.eval2(env, dump),
+                ("f", [x0, x1]) => x1.eval(env),
+                ("t", [x0, x1]) => x0.eval(env),
 
-                ("cons", [x0, x1, x2]) => ap(&ap(x2, x0).into(), x1).eval2(env, dump),
+                ("cons", [x0, x1, x2]) => ap(&ap(x2, x0).into(), x1).eval(env),
 
-                ("car", [x2]) => ap(x2, &t.into()).eval2(env, dump),
-                ("cdr", [x2]) => ap(x2, &f.into()).eval2(env, dump),
+                ("car", [x2]) => ap(x2, &t.into()).eval(env),
+                ("cdr", [x2]) => ap(x2, &f.into()).eval(env),
 
-                ("nil", [x0]) => t.eval2(env, dump),
-                ("isnil", [x0]) => x0.eval(env).then(|x0| match x0 {
-                    Op(s, v) if s == "nil" && v.len() == 0 => t.eval2(env, dump),
-                    Op(s, v) if s == "cons" && v.len() == 2 => f.eval2(env, dump),
+                ("nil", [x0]) => t.eval(env),
+                ("isnil", [x0]) => match x0.eval(env) {
+                    Op(s, v) if s == "nil" && v.len() == 0 => t.eval(env),
+                    Op(s, v) if s == "cons" && v.len() == 2 => f.eval(env),
                     _ => panic!("unexpected x0: {:?}", x0),
-                }),
-                (s, v) => {
+                },
+                _ => {
                     if v.len() >= 3 {
                         panic!();
                     }
-                    EvalResult::new(self.clone(), true)
+                    self.clone()
                 }
             },
-            _ => EvalResult::new(self.clone(), true),
+            _ => self.clone(),
         }
     }
 }
@@ -242,23 +238,6 @@ impl Expr {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct CachedExpr {
     expr: std::rc::Rc<std::cell::RefCell<Expr>>,
-}
-pub struct EvalResult {
-    pub expr: Expr,
-    cacheable: bool,
-}
-
-impl EvalResult {
-    fn new(expr: Expr, cacheable: bool) -> Self {
-        Self { expr, cacheable }
-    }
-    fn then(self, op: impl FnOnce(Expr) -> Self) -> Self {
-        let EvalResult { expr, cacheable } = op(self.expr);
-        EvalResult {
-            expr,
-            cacheable: cacheable && self.cacheable,
-        }
-    }
 }
 
 pub type Env = HashMap<String, Expr>;
@@ -277,15 +256,10 @@ pub fn default_env() -> Env {
 }
 
 impl CachedExpr {
-    fn eval(&self, env: &Env) -> EvalResult {
-        self.eval2(env, false)
-    }
-    fn eval2(&self, env: &Env, dump: bool) -> EvalResult {
-        let EvalResult { expr, cacheable } = self.expr.borrow().clone().eval2(env, dump);
-        if cacheable {
-            self.expr.replace(expr.clone());
-        }
-        EvalResult { expr, cacheable }
+    fn eval(&self, env: &Env) -> Expr {
+        let expr = self.expr.borrow().clone().eval(env);
+        self.expr.replace(expr.clone());
+        expr
     }
 }
 
@@ -416,7 +390,7 @@ impl G {
             let input = format!("ap ap {} {} {}", protocol, state, vector);
             let expr = parse_string(&self.env, &input);
             let (flag, new_state, data) = {
-                let e = expr.eval(&self.env).expr;
+                let e = expr.eval(&self.env);
                 let mut v = e.must_list(&self.env);
                 (v.remove(0), v.remove(0), v.remove(0))
             };

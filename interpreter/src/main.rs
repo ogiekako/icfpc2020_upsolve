@@ -53,6 +53,6 @@ fn run() {
 
     let e = parse_string(&env, &input);
     eprintln!("evaluating {}", &e);
-    let res = e.eval(&env).expr;
+    let res = e.eval(&env);
     println!("result: {}", res.reduce(&env));
 }
