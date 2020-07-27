@@ -1,10 +1,10 @@
 #![allow(unused)]
 
 extern crate anyhow;
-extern crate itertools;
-#[macro_use]
-extern crate lazy_static;
 extern crate console_error_panic_hook;
+
+extern crate itertools;
+extern crate lazy_static;
 extern crate serde;
 extern crate typed_arena;
 extern crate wasm_bindgen;
@@ -12,21 +12,82 @@ extern crate wasm_bindgen;
 #[cfg(target_os = "linux")]
 extern crate reqwest;
 
+use lazy_static::lazy_static;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    fmt::Formatter,
+    fmt::{Display, Formatter},
     rc::Rc,
+    sync::Mutex,
 };
 use typed_arena::Arena;
 use wasm_bindgen::prelude::*;
 
+lazy_static! {
+    static ref API_KEY: Mutex<String> = Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
+    static ref STR_PRIMITIVE: HashMap<&'static str, Primitive> = {
+        use Primitive::*;
+        let mut m = HashMap::new();
+        m.insert("add", Add);
+        m.insert("mul", Mul);
+        m.insert("div", Div);
+        m.insert("eq", Eq);
+        m.insert("lt", Lt);
+        m.insert("neg", Neg);
+        m.insert("s", S);
+        m.insert("c", C);
+        m.insert("b", B);
+        m.insert("i", I);
+        m.insert("f", F);
+        m.insert("t", T);
+        m.insert("cons", Cons);
+        m.insert("car", Car);
+        m.insert("cdr", Cdr);
+        m.insert("nil", Nil);
+        m.insert("isnil", Isnil);
+        m
+    };
+    static ref PRIMITIVE_STR: HashMap<Primitive, &'static str> = {
+        let mut res = HashMap::new();
+        STR_PRIMITIVE.iter().for_each(|(k, v)| {
+            res.insert(*v, *k);
+        });
+        res
+    };
+}
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub enum Expr {
+enum Expr {
     Ap(CachedExpr, CachedExpr),
-    Op(String, Vec<CachedExpr>),
+    Op(Primitive, Vec<CachedExpr>),
     Num(i64),
     Var(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum Primitive {
+    Add,
+    Mul,
+    Div,
+    Eq,
+    Lt,
+    Neg,
+    S,
+    C,
+    B,
+    I,
+    F,
+    T,
+    Cons,
+    Car,
+    Cdr,
+    Nil,
+    Isnil,
+}
+
+impl Display for Primitive {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", PRIMITIVE_STR.get(self).unwrap())
+    }
 }
 
 use Expr::*;
@@ -40,14 +101,11 @@ impl Into<CachedExpr> for Expr {
     }
 }
 
-lazy_static! {
-    static ref API_KEY: std::sync::Mutex<String> = std::sync::Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
-}
-
 impl Expr {
     fn eval(&self, env: &Env) -> Expr {
-        let ap = |x: CachedExpr, y: CachedExpr| Ap(x, y);
-        let bb = |b| if b { Op("t".into(), vec![]) } else { Op("f".into(), vec![]) };
+        use Primitive::*;
+
+        let bb = |b| if b { Op(Primitive::T, vec![]) } else { Op(Primitive::F, vec![]) };
 
         match self {
             Ap(l, r) => {
@@ -55,39 +113,39 @@ impl Expr {
                     Op(name, v) => {
                         let mut v = v.clone();
                         v.push(r.clone());
-                        Op(name.to_string(), v)
+                        Op(*name, v)
                     }
                     _ => panic!("not op or func l: {:?}", l),
                 };
                 e.eval(env)
             }
             Var(name) => env.get(name).unwrap().eval(env),
-            Op(name, v) => match (name.as_str(), &v.as_slice()) {
-                ("add", [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
-                ("mul", [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
-                ("div", [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
-                ("eq", [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
-                ("lt", [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
-                ("neg", [x]) => Num(-x.eval(env).must_num()),
+            Op(name, v) => match (name, &v.as_slice()) {
+                (Add, [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
+                (Mul, [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
+                (Div, [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
+                (Eq, [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
+                (Lt, [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
+                (Neg, [x]) => Num(-x.eval(env).must_num()),
 
-                ("s", [x0, x1, x2]) => ap(ap(x0.clone(), x2.clone()).into(), ap(x1.clone(), x2.clone()).into()).eval(env),
-                ("c", [x0, x1, x2]) => ap(ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
-                ("b", [x0, x1, x2]) => ap(x0.clone(), ap(x1.clone(), x2.clone()).into()).eval(env),
+                (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
+                (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
+                (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
 
-                ("i", [x0]) => x0.eval(env).clone(),
+                (I, [x0]) => x0.eval(env).clone(),
 
-                ("f", [x0, x1]) => x1.eval(env).clone(),
-                ("t", [x0, x1]) => x0.eval(env).clone(),
+                (F, [x0, x1]) => x1.eval(env).clone(),
+                (T, [x0, x1]) => x0.eval(env).clone(),
 
-                ("cons", [x0, x1, x2]) => ap(ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
+                (Cons, [x0, x1, x2]) => Ap(Ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
 
-                ("car", [x2]) => ap(x2.clone(), bb(true).into()).eval(env),
-                ("cdr", [x2]) => ap(x2.clone(), bb(false).into()).eval(env),
+                (Car, [x2]) => Ap(x2.clone(), bb(true).into()).eval(env),
+                (Cdr, [x2]) => Ap(x2.clone(), bb(false).into()).eval(env),
 
-                ("nil", [x0]) => bb(true).eval(env),
-                ("isnil", [x0]) => match &*x0.eval(env) {
-                    Op(s, v) if s == "nil" && v.len() == 0 => bb(true).eval(env),
-                    Op(s, v) if s == "cons" && v.len() == 2 => bb(false).eval(env),
+                (Nil, [x0]) => bb(true).eval(env),
+                (Isnil, [x0]) => match &*x0.eval(env) {
+                    Op(Nil, v) if v.len() == 0 => bb(true).eval(env),
+                    Op(Cons, v) if v.len() == 2 => bb(false).eval(env),
                     _ => panic!("unexpected x0: {:?}", x0),
                 },
                 _ => {
@@ -107,17 +165,17 @@ impl Expr {
             _ => panic!("not a num: {}", self),
         }
     }
-    fn must_op(&self) -> (&str, &[CachedExpr]) {
+    fn must_op(&self) -> (&Primitive, &[CachedExpr]) {
         match self {
-            Op(s, v) => (s.as_str(), v.as_slice()),
+            Op(s, v) => (s, v.as_slice()),
             _ => panic!("not op"),
         }
     }
     fn must_list_rev(&self, env: &Env) -> Vec<Expr> {
         let e = self.eval(env);
         match e.must_op() {
-            ("nil", []) => vec![],
-            ("cons", [x0, x1]) => {
+            (Primitive::Nil, []) => vec![],
+            (Primitive::Cons, [x0, x1]) => {
                 let mut res = x1.expr.borrow().must_list_rev(env);
                 res.push(x0.expr.borrow().clone());
                 res
@@ -131,7 +189,7 @@ impl Expr {
     fn must_point(&self, env: &Env) -> (i64, i64) {
         let e = self.eval(env);
         match e.must_op() {
-            ("cons", [x, y]) => {
+            (Primitive::Cons, [x, y]) => {
                 let x = x.eval(env);
                 let y = y.eval(env);
                 (x.must_num(), y.must_num())
@@ -140,10 +198,10 @@ impl Expr {
         }
     }
     fn cons(hd: CachedExpr, tl: CachedExpr) -> Expr {
-        Ap(Ap(Op("cons".into(), vec![]).into(), hd).into(), tl)
+        Ap(Ap(Op(Primitive::Cons, vec![]).into(), hd).into(), tl)
     }
     fn nil() -> Expr {
-        Op("nil".into(), vec![])
+        Op(Primitive::Nil, vec![])
     }
 
     fn demod(&self, env: &Env) -> Expr {
@@ -178,8 +236,8 @@ impl Expr {
                 res
             }
             _ => match e.must_op() {
-                ("nil", []) => "00".into(),
-                ("cons", [hd, tl]) => "11".to_string() + &hd.expr.borrow().modulate(env) + &tl.expr.borrow().modulate(env),
+                (Primitive::Nil, []) => "00".into(),
+                (Primitive::Cons, [hd, tl]) => "11".to_string() + &hd.expr.borrow().modulate(env) + &tl.expr.borrow().modulate(env),
                 _ => panic!("unexpected op {}", e),
             },
         }
@@ -214,14 +272,14 @@ impl Expr {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct CachedExpr {
+struct CachedExpr {
     expr: Rc<RefCell<Expr>>,
     cached: Rc<RefCell<bool>>,
 }
 
-pub type Env = HashMap<String, Expr>;
+type Env = HashMap<String, Expr>;
 
-pub fn default_env() -> Env {
+fn default_env() -> Env {
     let mut env = Env::new();
 
     for line in include_str!("../galaxy.txt").split("\n") {
@@ -250,7 +308,7 @@ impl std::fmt::Display for Expr {
         match self {
             Expr::Ap(l, r) => write!(f, "ap {} {}", l.expr.borrow(), r.expr.borrow()),
             Expr::Op(s, v) => {
-                let mut res = s.to_string();
+                let mut res = format!("{}", s);
                 for e in v.iter() {
                     res = format!("ap {} {}", res, e.expr.borrow());
                 }
@@ -262,7 +320,7 @@ impl std::fmt::Display for Expr {
     }
 }
 
-pub fn parse_string(env: &Env, expr: &str) -> Expr {
+fn parse_string(env: &Env, expr: &str) -> Expr {
     parse(env, &mut expr.split(" ").map(String::from).into_iter().peekable())
 }
 
@@ -292,9 +350,9 @@ fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<It
         "ap" => Ap(parse(env, &mut it).into(), parse(env, &mut it).into()),
         "add" | "b" | "c" | "car" | "cdr" | "cons" | "div" | "eq" | "i" | "isnil" | "lt" | "f" | "mod" | "dem" | "vec" | "mul" | "neg" | "nil" | "s" | "t" => {
             if s == "vec" {
-                Op("cons".into(), vec![]).into()
+                Op(Primitive::Cons, vec![]).into()
             } else {
-                Op(s.into(), vec![]).into()
+                Op(*STR_PRIMITIVE.get(s.as_str()).unwrap(), vec![]).into()
             }
         }
         s => {
