@@ -10,10 +10,7 @@ use anyhow::{anyhow, bail, Result};
 use std::io::Read;
 
 fn main() {
-    let child = std::thread::Builder::new()
-        .stack_size(256 * 1024 * 1024)
-        .spawn(move || run())
-        .unwrap();
+    let child = std::thread::Builder::new().stack_size(256 * 1024 * 1024).spawn(move || run()).unwrap();
     child.join().unwrap();
 }
 
@@ -22,11 +19,13 @@ fn galaxy(input: &str) -> String {
 }
 
 fn run() {
+    let g = interpreter::G::new();
     {
         // let state = "ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons -1 nil ap ap cons 0 ap ap cons nil nil";
         let state = "ap ap cons 5 ap ap cons ap ap cons 2 ap ap cons 0 ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil";
-        let (next_state, images) = interpreter::galaxy(state.into(), (0, 0));
-        eprintln!("finished computing galaxy: {} {:?}", next_state, images);
+        // let res = g.galaxy(state.into(), 0, 0);
+        // res.image()
+        // eprintln!("finished computing galaxy: {{}} {:?}", res.state, res.images);
 
         return;
     }
@@ -45,9 +44,7 @@ fn run() {
     std::io::stdin().read_to_string(&mut input);
     if input.is_empty() {
         input = galaxy("nil");
-        input = galaxy(
-            "ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil",
-        );
+        input = galaxy("ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil");
     } else {
         input = galaxy(&input.trim());
     }
