@@ -102,10 +102,15 @@ impl Into<CachedExpr> for Expr {
 }
 
 impl Expr {
+    fn boolean(b: bool) -> Expr {
+        if b {
+            Op(Primitive::T, vec![])
+        } else {
+            Op(Primitive::F, vec![])
+        }
+    }
     fn eval(&self, env: &Env) -> Expr {
         use Primitive::*;
-
-        let bb = |b| if b { Op(Primitive::T, vec![]) } else { Op(Primitive::F, vec![]) };
 
         match self {
             Ap(l, r) => {
@@ -121,39 +126,32 @@ impl Expr {
             }
             Var(name) => env.get(name).unwrap().eval(env),
             Op(name, v) => match (name, &v.as_slice()) {
+                (I, [x0]) => x0.eval(env).clone(),
+                (Car, [x2]) => Ap(x2.clone(), Expr::boolean(true).into()).eval(env),
+                (Cdr, [x2]) => Ap(x2.clone(), Expr::boolean(false).into()).eval(env),
+                (Neg, [x]) => Num(-x.eval(env).must_num()),
+                (Nil, [x0]) => Expr::boolean(true).eval(env),
+                (Isnil, [x0]) => match &*x0.eval(env) {
+                    Op(Nil, v) if v.len() == 0 => Expr::boolean(true).eval(env),
+                    Op(Cons, v) if v.len() == 2 => Expr::boolean(false).eval(env),
+                    _ => panic!("unexpected x0: {:?}", x0),
+                },
+                (F, [x0, x1]) => x1.eval(env).clone(),
+                (T, [x0, x1]) => x0.eval(env).clone(),
+
                 (Add, [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
                 (Mul, [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
                 (Div, [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
-                (Eq, [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
-                (Lt, [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
-                (Neg, [x]) => Num(-x.eval(env).must_num()),
+                (Eq, [x, y]) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
+                (Lt, [x, y]) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
 
                 (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
                 (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
                 (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
 
-                (I, [x0]) => x0.eval(env).clone(),
-
-                (F, [x0, x1]) => x1.eval(env).clone(),
-                (T, [x0, x1]) => x0.eval(env).clone(),
-
                 (Cons, [x0, x1, x2]) => Ap(Ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
 
-                (Car, [x2]) => Ap(x2.clone(), bb(true).into()).eval(env),
-                (Cdr, [x2]) => Ap(x2.clone(), bb(false).into()).eval(env),
-
-                (Nil, [x0]) => bb(true).eval(env),
-                (Isnil, [x0]) => match &*x0.eval(env) {
-                    Op(Nil, v) if v.len() == 0 => bb(true).eval(env),
-                    Op(Cons, v) if v.len() == 2 => bb(false).eval(env),
-                    _ => panic!("unexpected x0: {:?}", x0),
-                },
-                _ => {
-                    if v.len() >= 3 {
-                        panic!();
-                    }
-                    self.clone()
-                }
+                _ => self.clone(),
             },
             _ => self.clone(),
         }
