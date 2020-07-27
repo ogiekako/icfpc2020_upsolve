@@ -6,6 +6,7 @@ extern crate itertools;
 extern crate lazy_static;
 extern crate console_error_panic_hook;
 extern crate serde;
+extern crate typed_arena;
 extern crate wasm_bindgen;
 
 #[cfg(target_os = "linux")]
@@ -17,6 +18,7 @@ use std::{
     fmt::Formatter,
     rc::Rc,
 };
+use typed_arena::Arena;
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -32,7 +34,8 @@ use Expr::*;
 impl Into<CachedExpr> for Expr {
     fn into(self) -> CachedExpr {
         CachedExpr {
-            expr: std::rc::Rc::new(std::cell::RefCell::new(self)),
+            expr: Rc::new(RefCell::new(self)),
+            cached: Rc::new(RefCell::new(false)),
         }
     }
 }
@@ -42,6 +45,62 @@ lazy_static! {
 }
 
 impl Expr {
+    fn eval(&self, env: &Env) -> Expr {
+        let ap = |x: CachedExpr, y: CachedExpr| Ap(x, y);
+        let bb = |b| if b { Op("t".into(), vec![]) } else { Op("f".into(), vec![]) };
+
+        match self {
+            Ap(l, r) => {
+                let e = match &*l.eval(env) {
+                    Op(name, v) => {
+                        let mut v = v.clone();
+                        v.push(r.clone());
+                        Op(name.to_string(), v)
+                    }
+                    _ => panic!("not op or func l: {:?}", l),
+                };
+                e.eval(env)
+            }
+            Var(name) => env.get(name).unwrap().eval(env),
+            Op(name, v) => match (name.as_str(), &v.as_slice()) {
+                ("add", [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
+                ("mul", [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
+                ("div", [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
+                ("eq", [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
+                ("lt", [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
+                ("neg", [x]) => Num(-x.eval(env).must_num()),
+
+                ("s", [x0, x1, x2]) => ap(ap(x0.clone(), x2.clone()).into(), ap(x1.clone(), x2.clone()).into()).eval(env),
+                ("c", [x0, x1, x2]) => ap(ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
+                ("b", [x0, x1, x2]) => ap(x0.clone(), ap(x1.clone(), x2.clone()).into()).eval(env),
+
+                ("i", [x0]) => x0.eval(env).clone(),
+
+                ("f", [x0, x1]) => x1.eval(env).clone(),
+                ("t", [x0, x1]) => x0.eval(env).clone(),
+
+                ("cons", [x0, x1, x2]) => ap(ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
+
+                ("car", [x2]) => ap(x2.clone(), bb(true).into()).eval(env),
+                ("cdr", [x2]) => ap(x2.clone(), bb(false).into()).eval(env),
+
+                ("nil", [x0]) => bb(true).eval(env),
+                ("isnil", [x0]) => match &*x0.eval(env) {
+                    Op(s, v) if s == "nil" && v.len() == 0 => bb(true).eval(env),
+                    Op(s, v) if s == "cons" && v.len() == 2 => bb(false).eval(env),
+                    _ => panic!("unexpected x0: {:?}", x0),
+                },
+                _ => {
+                    if v.len() >= 3 {
+                        panic!();
+                    }
+                    self.clone()
+                }
+            },
+            _ => self.clone(),
+        }
+    }
+
     fn must_num(&self) -> i64 {
         match self {
             Expr::Num(x) => *x,
@@ -59,7 +118,7 @@ impl Expr {
         match e.must_op() {
             ("nil", []) => vec![],
             ("cons", [x0, x1]) => {
-                let mut res = x1.expr.borrow().clone().must_list_rev(env);
+                let mut res = x1.expr.borrow().must_list_rev(env);
                 res.push(x0.expr.borrow().clone());
                 res
             }
@@ -120,11 +179,7 @@ impl Expr {
             }
             _ => match e.must_op() {
                 ("nil", []) => "00".into(),
-                ("cons", [hd, tl]) => {
-                    let hd = hd.expr.borrow().clone();
-                    let tl = tl.expr.borrow().clone();
-                    "11".to_string() + &hd.modulate(env) + &tl.modulate(env)
-                }
+                ("cons", [hd, tl]) => "11".to_string() + &hd.expr.borrow().modulate(env) + &tl.expr.borrow().modulate(env),
                 _ => panic!("unexpected op {}", e),
             },
         }
@@ -156,88 +211,12 @@ impl Expr {
             }
         }
     }
-
-    pub fn reduce(&self, env: &Env) -> Expr {
-        let x = self.eval(env);
-        // eprintln!("result before reduce: {}", x);
-        match x {
-            Op(s, v) => Op(s, v.iter().map(|e| e.expr.borrow().reduce(env).into()).collect()),
-            Num(_) => x,
-            _ => panic!("unexpected expr after eval: {}", x),
-        }
-    }
-
-    pub fn eval(&self, env: &Env) -> Expr {
-        let ap = |x: &CachedExpr, y: &CachedExpr| Ap(x.clone(), y.clone());
-        let t = Op("t".to_string(), vec![]);
-        let f = Op("f".to_string(), vec![]);
-        let bb = |b| if b { t.clone() } else { f.clone() };
-
-        match self {
-            Ap(l, r) => {
-                let e = match l.eval(env) {
-                    Op(name, v) => {
-                        let mut v = v.clone();
-                        v.push(r.clone());
-                        Op(name.to_string(), v)
-                    }
-                    _ => panic!("not op or func l: {:?}", l),
-                };
-                e.eval(env)
-            }
-            Var(name) => env.get(name).unwrap().eval(env),
-            Op(name, v) => match (name.as_str(), &v.as_slice()) {
-                ("add", [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
-                ("mul", [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
-                ("div", [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
-                ("eq", [x, y]) => bb(x.eval(env).must_num() == y.eval(env).must_num()),
-                ("lt", [x, y]) => bb(x.eval(env).must_num() < y.eval(env).must_num()),
-                ("neg", [x]) => Num(-x.eval(env).must_num()),
-
-                ("s", [x0, x1, x2]) => {
-                    //
-                    ap(&ap(x0, x2).into(), &ap(x1, x2).into()).eval(env)
-                }
-                ("c", [x0, x1, x2]) => {
-                    //
-                    ap(&ap(x0, x2).into(), x1).eval(env)
-                }
-                ("b", [x0, x1, x2]) => {
-                    //
-                    ap(x0, &ap(x1, x2).into()).eval(env)
-                }
-
-                ("i", [x0]) => x0.eval(env),
-
-                ("f", [x0, x1]) => x1.eval(env),
-                ("t", [x0, x1]) => x0.eval(env),
-
-                ("cons", [x0, x1, x2]) => ap(&ap(x2, x0).into(), x1).eval(env),
-
-                ("car", [x2]) => ap(x2, &t.into()).eval(env),
-                ("cdr", [x2]) => ap(x2, &f.into()).eval(env),
-
-                ("nil", [x0]) => t.eval(env),
-                ("isnil", [x0]) => match x0.eval(env) {
-                    Op(s, v) if s == "nil" && v.len() == 0 => t.eval(env),
-                    Op(s, v) if s == "cons" && v.len() == 2 => f.eval(env),
-                    _ => panic!("unexpected x0: {:?}", x0),
-                },
-                _ => {
-                    if v.len() >= 3 {
-                        panic!();
-                    }
-                    self.clone()
-                }
-            },
-            _ => self.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct CachedExpr {
-    expr: std::rc::Rc<std::cell::RefCell<Expr>>,
+    expr: Rc<RefCell<Expr>>,
+    cached: Rc<RefCell<bool>>,
 }
 
 pub type Env = HashMap<String, Expr>;
@@ -256,10 +235,13 @@ pub fn default_env() -> Env {
 }
 
 impl CachedExpr {
-    fn eval(&self, env: &Env) -> Expr {
-        let expr = self.expr.borrow().clone().eval(env);
+    fn eval(&self, env: &Env) -> std::cell::Ref<Expr> {
+        if self.cached.replace(true) {
+            return self.expr.borrow();
+        }
+        let expr = self.expr.borrow().eval(env);
         self.expr.replace(expr.clone());
-        expr
+        self.expr.borrow()
     }
 }
 
@@ -527,7 +509,7 @@ mod tests {
             ("ap car ( 1 , 2 )", "1"),
             ("ap ap ap s mul ap add 1 6", "42"),
             ("ap ap ap c add 1 2", "3"),
-            ("ap i ap add 1", "ap add 1"),
+            ("ap ap ap c i 1 ap i ap add 1", "2"),
             ("ap ap div 4 2", "2"),
             ("ap ap div 4 3", "1"),
             ("ap ap div 4 4", "1"),
@@ -547,8 +529,8 @@ mod tests {
             eprintln!("e1: {}", e1);
             eprintln!("e2: {}", e2);
 
-            let e1 = e1.reduce(&env);
-            let e2 = e2.reduce(&env);
+            let e1 = e1.eval(&env).demod(&env);
+            let e2 = e2.eval(&env).demod(&env);
 
             eprintln!("e1.eval: {}", e1);
             eprintln!("e2.eval: {}", e2);
@@ -573,7 +555,7 @@ mod tests {
         {
             let e1 = parse_string(&env, tc.1);
             eprintln!("e1: {}", e1);
-            let e1 = e1.reduce(&env);
+            let e1 = e1.eval(&env).demod(&env);
             let bin = e1.modulate(&env);
 
             assert_eq!(tc.0, bin);

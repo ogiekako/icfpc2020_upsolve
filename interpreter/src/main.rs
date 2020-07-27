@@ -19,40 +19,16 @@ fn galaxy(input: &str) -> String {
 }
 
 fn run() {
+    let start = std::time::Instant::now();
+
     let g = interpreter::G::new();
-    {
-        // let state = "ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons -1 nil ap ap cons 0 ap ap cons nil nil";
-        let state = "ap ap cons 5 ap ap cons ap ap cons 2 ap ap cons 0 ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil";
-        // let res = g.galaxy(state.into(), 0, 0);
-        // res.image()
-        // eprintln!("finished computing galaxy: {{}} {:?}", res.state, res.images);
 
-        return;
-    }
+    let state =  "ap ap cons 3 ap ap cons ap ap cons 0 ap ap cons ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil".into();
+    let vector = (0, 0);
 
-    // let matches = clap::App::new("interpreter")
-    //     .arg(
-    //         clap::Arg::with_name("piston")
-    //             .short("p")
-    //             .long("piston")
-    //             .help("Use piston game engine"),
-    //     )
-    //     .get_matches();
+    let next_state = g.galaxy(state, vector.0, vector.1, "").state();
+    assert_eq!(next_state, "ap ap cons 3 ap ap cons ap ap cons 0 ap ap cons ap ap cons 1 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 2 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil");
 
-    let mut input = String::new();
-
-    std::io::stdin().read_to_string(&mut input);
-    if input.is_empty() {
-        input = galaxy("nil");
-        input = galaxy("ap ap cons 2 ap ap cons ap ap cons 1 ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil");
-    } else {
-        input = galaxy(&input.trim());
-    }
-
-    let mut env = default_env();
-
-    let e = parse_string(&env, &input);
-    eprintln!("evaluating {}", &e);
-    let res = e.eval(&env);
-    println!("result: {}", res.reduce(&env));
+    let d = std::time::Instant::now() - start;
+    eprintln!("computed in {:?}", d);
 }
