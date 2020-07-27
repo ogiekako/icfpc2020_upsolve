@@ -87,6 +87,10 @@ impl Expr {
         Op("nil".into(), vec![])
     }
 
+    fn demod(&self, env: &Env) -> Expr {
+        Expr::demodulate(&self.modulate(env))
+    }
+
     fn modulate(&self, env: &Env) -> String {
         let e = self.eval(env).expr;
 
@@ -413,16 +417,15 @@ impl G {
             let expr = parse_string(&self.env, &input);
             let (flag, new_state, data) = {
                 let e = expr.eval(&self.env).expr;
-                eprintln!("e: {}", e);
                 let mut v = e.must_list(&self.env);
                 (v.remove(0), v.remove(0), v.remove(0))
             };
 
-            state = format!("{}", new_state);
+            state = format!("{}", new_state.demod(env));
             match flag.must_num() {
                 0 => {
                     return InteractResult {
-                        state: format!("{}", Expr::demodulate(&new_state.modulate(env))),
+                        state,
                         images: data
                             .must_list(env)
                             .into_iter()
@@ -468,11 +471,11 @@ mod tests {
     #[test]
     fn test_galaxy() {
         let g = G::new();
-        for tc in vec![("nil", (0, 0))] {
-            let res = g.galaxy(tc.0.to_string(), (tc.1).0, (tc.1).1, API_KEY.lock().unwrap().as_str());
-            assert_eq!(res.state, "ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil");
-            assert_eq!(
-                res.images,
+        for tc in vec![
+            (
+                "nil",
+                (0, 0),
+                "ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil",
                 vec![
                     vec![
                         (-3, 0),
@@ -494,12 +497,47 @@ mod tests {
                         (2, -2),
                         (2, 1),
                         (3, -1),
-                        (3, 0)
+                        (3, 0),
                     ],
                     vec![(-8, -2), (-7, -3)],
-                    vec![]
-                ]
-            );
+                    vec![],
+                ],
+            ),
+            (
+                "ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil",
+                (0, 0),
+                "ap ap cons 0 ap ap cons ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil",
+                vec![
+                    vec![
+                        (-3, 0),
+                        (-3, 1),
+                        (-2, -1),
+                        (-2, 2),
+                        (-1, -3),
+                        (-1, -1),
+                        (-1, 0),
+                        (-1, 3),
+                        (0, -3),
+                        (0, -1),
+                        (0, 1),
+                        (0, 3),
+                        (1, -3),
+                        (1, 0),
+                        (1, 1),
+                        (1, 3),
+                        (2, -2),
+                        (2, 1),
+                        (3, -1),
+                        (3, 0),
+                    ],
+                    vec![(-8, -2), (-7, -3), (-7, -2)],
+                    vec![],
+                ],
+            ),
+        ] {
+            let res = g.galaxy(tc.0.to_string(), (tc.1).0, (tc.1).1, API_KEY.lock().unwrap().as_str());
+            assert_eq!(res.state, tc.2);
+            assert_eq!(res.images, tc.3);
         }
     }
 
