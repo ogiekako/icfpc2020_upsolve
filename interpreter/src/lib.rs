@@ -109,23 +109,25 @@ impl Expr {
             Op(Primitive::F, vec![])
         }
     }
-    fn eval(&self, env: &Env) -> Expr {
+    fn eval(self, env: &Env) -> Expr {
         use Primitive::*;
 
         match self {
-            Ap(l, r) => {
-                let e = match &*l.eval(env) {
-                    Op(name, v) => {
-                        let mut v = v.clone();
-                        v.push(r.clone());
-                        Op(*name, v)
-                    }
-                    _ => panic!("not op or func l: {:?}", l),
-                };
-                e.eval(env)
+            Ap(l, r) => match &*l.eval(env) {
+                Op(name, v) => {
+                    let mut v = v.clone();
+                    v.push(r.clone());
+                    Op(*name, v)
+                }
+                _ => panic!("not op or func l: {:?}", l),
             }
-            Var(name) => env.get(name).unwrap().eval(env),
+            .eval(env),
+            Var(name) => env.get(&name).unwrap().clone().eval(env),
             Op(name, v) => match (name, &v.as_slice()) {
+                (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
+                (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
+                (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
+
                 (I, [x0]) => x0.eval(env).clone(),
                 (Car, [x2]) => Ap(x2.clone(), Expr::boolean(true).into()).eval(env),
                 (Cdr, [x2]) => Ap(x2.clone(), Expr::boolean(false).into()).eval(env),
@@ -145,15 +147,11 @@ impl Expr {
                 (Eq, [x, y]) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
                 (Lt, [x, y]) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
 
-                (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
-                (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
-                (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
-
                 (Cons, [x0, x1, x2]) => Ap(Ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
 
-                _ => self.clone(),
+                _ => Op(name, v),
             },
-            _ => self.clone(),
+            _ => self,
         }
     }
 
@@ -169,22 +167,22 @@ impl Expr {
             _ => panic!("not op"),
         }
     }
-    fn must_list_rev(&self, env: &Env) -> Vec<Expr> {
+    fn must_list_rev(self, env: &Env) -> Vec<Expr> {
         let e = self.eval(env);
         match e.must_op() {
             (Primitive::Nil, []) => vec![],
             (Primitive::Cons, [x0, x1]) => {
-                let mut res = x1.expr.borrow().must_list_rev(env);
+                let mut res = x1.eval(&env).clone().must_list_rev(env);
                 res.push(x0.expr.borrow().clone());
                 res
             }
             _ => panic!("not list"),
         }
     }
-    fn must_list(&self, env: &Env) -> Vec<Expr> {
+    fn must_list(self, env: &Env) -> Vec<Expr> {
         self.must_list_rev(env).into_iter().rev().collect()
     }
-    fn must_point(&self, env: &Env) -> (i64, i64) {
+    fn must_point(self, env: &Env) -> (i64, i64) {
         let e = self.eval(env);
         match e.must_op() {
             (Primitive::Cons, [x, y]) => {
@@ -192,7 +190,7 @@ impl Expr {
                 let y = y.eval(env);
                 (x.must_num(), y.must_num())
             }
-            _ => panic!("not vec: {}", self),
+            _ => panic!("not vec"),
         }
     }
     fn cons(hd: CachedExpr, tl: CachedExpr) -> Expr {
@@ -202,11 +200,11 @@ impl Expr {
         Op(Primitive::Nil, vec![])
     }
 
-    fn demod(&self, env: &Env) -> Expr {
+    fn demod(self, env: &Env) -> Expr {
         Expr::demodulate(&self.modulate(env))
     }
 
-    fn modulate(&self, env: &Env) -> String {
+    fn modulate(self, env: &Env) -> String {
         let e = self.eval(env);
 
         match e {
@@ -235,7 +233,7 @@ impl Expr {
             }
             _ => match e.must_op() {
                 (Primitive::Nil, []) => "00".into(),
-                (Primitive::Cons, [hd, tl]) => "11".to_string() + &hd.expr.borrow().modulate(env) + &tl.expr.borrow().modulate(env),
+                (Primitive::Cons, [hd, tl]) => "11".to_string() + &hd.eval(env).clone().modulate(env) + &tl.expr.borrow().clone().modulate(env),
                 _ => panic!("unexpected op {}", e),
             },
         }
@@ -295,7 +293,7 @@ impl CachedExpr {
         if self.cached.replace(true) {
             return self.expr.borrow();
         }
-        let expr = self.expr.borrow().eval(env);
+        let expr = self.expr.borrow().clone().eval(env);
         self.expr.replace(expr.clone());
         self.expr.borrow()
     }
@@ -649,7 +647,7 @@ fn send_url(api_key: &str) -> String {
 
 fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
     eprintln!("sending: {}", req);
-    let req = req.modulate(env);
+    let req = req.clone().modulate(env);
     Expr::demodulate(&request(&send_url(api_key), req))
 }
 
