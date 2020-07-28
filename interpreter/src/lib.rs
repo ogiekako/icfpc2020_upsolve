@@ -123,7 +123,7 @@ impl Expr {
             }
             .eval(env),
             Var(name) => env.get(&name).unwrap().clone().eval(env),
-            Op(name, v) => match (name, &v.as_slice()) {
+            Op(name, v) => match (name, v.as_slice()) {
                 (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
                 (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
                 (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
@@ -290,11 +290,10 @@ fn default_env() -> Env {
 
 impl CachedExpr {
     fn eval(&self, env: &Env) -> std::cell::Ref<Expr> {
-        if self.cached.replace(true) {
-            return self.expr.borrow();
+        if !self.cached.replace(true) {
+            let expr = self.expr.borrow().clone().eval(env);
+            self.expr.replace(expr);
         }
-        let expr = self.expr.borrow().clone().eval(env);
-        self.expr.replace(expr.clone());
         self.expr.borrow()
     }
 }
@@ -323,8 +322,11 @@ fn parse_string(env: &Env, expr: &str) -> Expr {
 fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<Item = String>>) -> Expr {
     use Expr::*;
 
-    let s = it.next().expect("iterator exhausted");
-    match s.as_str() {
+    let mut s: &str = &it.next().expect("iterator exhausted");
+    if s == "vec" {
+        s = "cons";
+    }
+    match s {
         "(" => {
             let mut lst = vec![];
             loop {
@@ -344,15 +346,10 @@ fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<It
             res
         }
         "ap" => Ap(parse(env, &mut it).into(), parse(env, &mut it).into()),
-        "add" | "b" | "c" | "car" | "cdr" | "cons" | "div" | "eq" | "i" | "isnil" | "lt" | "f" | "mod" | "dem" | "vec" | "mul" | "neg" | "nil" | "s" | "t" => {
-            if s == "vec" {
-                Op(Primitive::Cons, vec![]).into()
-            } else {
-                Op(*STR_PRIMITIVE.get(s.as_str()).unwrap(), vec![]).into()
-            }
-        }
         s => {
-            if let Ok(i) = s.parse::<i64>() {
+            if let Some(p) = STR_PRIMITIVE.get(s) {
+                Op(*p, vec![]).into()
+            } else if let Ok(i) = s.parse::<i64>() {
                 Num(i)
             } else if env.contains_key(s) || s.chars().next().unwrap() == ':' || s.chars().next().unwrap() == 'x' {
                 Var(s.to_string())
