@@ -55,10 +55,11 @@ lazy_static! {
         res
     };
 }
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 enum Expr {
     Ap(CachedExpr, CachedExpr),
-    Op(Primitive, Vec<CachedExpr>),
+    Op(Primitive, Option<CachedExpr>, Option<CachedExpr>, Option<CachedExpr>),
     Num(i64),
     Var(String),
 }
@@ -104,53 +105,50 @@ impl Into<CachedExpr> for Expr {
 impl Expr {
     fn boolean(b: bool) -> Expr {
         if b {
-            Op(Primitive::T, vec![])
+            Expr::op(Primitive::T)
         } else {
-            Op(Primitive::F, vec![])
+            Expr::op(Primitive::F)
         }
+    }
+    fn op(p: Primitive) -> Expr {
+        Op(p, None, None, None)
     }
     fn eval(self, env: &Env) -> Expr {
         use Primitive::*;
 
         match self {
             Ap(l, r) => match &*l.eval(env) {
-                Op(name, v) => {
-                    let mut v = v.clone();
-                    v.push(r.clone());
-                    Op(*name, v)
-                }
-                _ => panic!("not op or func l: {:?}", l),
+                Op(name, None, _, _) => Op(*name, Some(r), None, None),
+                Op(name, x, None, _) => Op(*name, x.clone(), Some(r), None),
+                Op(name, x, y, None) => Op(*name, x.clone(), y.clone(), Some(r)),
+                _ => panic!("unexpected lhs: {:?}", l),
             }
             .eval(env),
             Var(name) => env.get(&name).unwrap().clone().eval(env),
-            Op(name, v) => match (name, v.as_slice()) {
-                (B, [x0, x1, x2]) => Ap(x0.clone(), Ap(x1.clone(), x2.clone()).into()).eval(env),
-                (C, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), x1.clone()).eval(env),
-                (S, [x0, x1, x2]) => Ap(Ap(x0.clone(), x2.clone()).into(), Ap(x1.clone(), x2.clone()).into()).eval(env),
+            Op(B, Some(x), Some(y), Some(z)) => Ap(x, Ap(y, z).into()).eval(env),
+            Op(C, Some(x), Some(y), Some(z)) => Ap(Ap(x, z).into(), y).eval(env),
+            Op(S, Some(x), Some(y), Some(z)) => Ap(Ap(x, z.clone()).into(), Ap(y, z).into()).eval(env),
 
-                (I, [x0]) => x0.eval(env).clone(),
-                (Car, [x2]) => Ap(x2.clone(), Expr::boolean(true).into()).eval(env),
-                (Cdr, [x2]) => Ap(x2.clone(), Expr::boolean(false).into()).eval(env),
-                (Neg, [x]) => Num(-x.eval(env).must_num()),
-                (Nil, [x0]) => Expr::boolean(true).eval(env),
-                (Isnil, [x0]) => match &*x0.eval(env) {
-                    Op(Nil, v) if v.len() == 0 => Expr::boolean(true).eval(env),
-                    Op(Cons, v) if v.len() == 2 => Expr::boolean(false).eval(env),
-                    _ => panic!("unexpected x0: {:?}", x0),
-                },
-                (F, [x0, x1]) => x1.eval(env).clone(),
-                (T, [x0, x1]) => x0.eval(env).clone(),
-
-                (Add, [x, y]) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
-                (Mul, [x, y]) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
-                (Div, [x, y]) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
-                (Eq, [x, y]) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
-                (Lt, [x, y]) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
-
-                (Cons, [x0, x1, x2]) => Ap(Ap(x2.clone(), x0.clone()).into(), x1.clone()).eval(env),
-
-                _ => Op(name, v),
+            Op(I, Some(x), _, _) => x.eval(env).clone(),
+            Op(Car, Some(x), _, _) => Ap(x, Expr::boolean(true).into()).eval(env),
+            Op(Cdr, Some(x), _, _) => Ap(x, Expr::boolean(false).into()).eval(env),
+            Op(Neg, Some(x), _, _) => Num(-x.eval(env).must_num()),
+            Op(Nil, Some(_), _, _) => Expr::boolean(true).eval(env),
+            Op(Isnil, Some(x), _, _) => match &*x.eval(env) {
+                Op(Nil, None, _, _) => Expr::boolean(true).eval(env),
+                Op(Cons, Some(_), Some(_), None) => Expr::boolean(false).eval(env),
+                _ => panic!("unexpected x: {:?}", x),
             },
+            Op(T, Some(x), Some(_), _) => x.eval(env).clone(),
+            Op(F, Some(_), Some(y), _) => y.eval(env).clone(),
+
+            Op(Add, Some(x), Some(y), _) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
+            Op(Mul, Some(x), Some(y), _) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
+            Op(Div, Some(x), Some(y), _) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
+            Op(Eq, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
+            Op(Lt, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
+
+            Op(Cons, Some(x), Some(y), Some(z)) => Ap(Ap(z, x).into(), y).eval(env),
             _ => self,
         }
     }
@@ -161,17 +159,11 @@ impl Expr {
             _ => panic!("not a num: {}", self),
         }
     }
-    fn must_op(&self) -> (&Primitive, &[CachedExpr]) {
-        match self {
-            Op(s, v) => (s, v.as_slice()),
-            _ => panic!("not op"),
-        }
-    }
     fn must_list_rev(self, env: &Env) -> Vec<Expr> {
         let e = self.eval(env);
-        match e.must_op() {
-            (Primitive::Nil, []) => vec![],
-            (Primitive::Cons, [x0, x1]) => {
+        match e {
+            Op(Primitive::Nil, None, _, _) => vec![],
+            Op(Primitive::Cons, Some(x0), Some(x1), None) => {
                 let mut res = x1.eval(&env).clone().must_list_rev(env);
                 res.push(x0.expr.borrow().clone());
                 res
@@ -184,8 +176,8 @@ impl Expr {
     }
     fn must_point(self, env: &Env) -> (i64, i64) {
         let e = self.eval(env);
-        match e.must_op() {
-            (Primitive::Cons, [x, y]) => {
+        match e {
+            Op(Primitive::Cons, Some(x), Some(y), None) => {
                 let x = x.eval(env);
                 let y = y.eval(env);
                 (x.must_num(), y.must_num())
@@ -194,10 +186,10 @@ impl Expr {
         }
     }
     fn cons(hd: CachedExpr, tl: CachedExpr) -> Expr {
-        Ap(Ap(Op(Primitive::Cons, vec![]).into(), hd).into(), tl)
+        Op(Primitive::Cons, Some(hd), Some(tl), None)
     }
     fn nil() -> Expr {
-        Op(Primitive::Nil, vec![])
+        Expr::op(Primitive::Nil)
     }
 
     fn demod(self, env: &Env) -> Expr {
@@ -231,9 +223,9 @@ impl Expr {
                 }
                 res
             }
-            _ => match e.must_op() {
-                (Primitive::Nil, []) => "00".into(),
-                (Primitive::Cons, [hd, tl]) => "11".to_string() + &hd.eval(env).clone().modulate(env) + &tl.expr.borrow().clone().modulate(env),
+            _ => match e {
+                Op(Primitive::Nil, None, _, _) => "00".into(),
+                Op(Primitive::Cons, Some(hd), Some(tl), None) => "11".to_string() + &hd.eval(env).clone().modulate(env) + &tl.expr.borrow().clone().modulate(env),
                 _ => panic!("unexpected op {}", e),
             },
         }
@@ -302,10 +294,12 @@ impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Ap(l, r) => write!(f, "ap {} {}", l.expr.borrow(), r.expr.borrow()),
-            Expr::Op(s, v) => {
+            Expr::Op(s, x, y, z) => {
                 let mut res = format!("{}", s);
-                for e in v.iter() {
-                    res = format!("ap {} {}", res, e.expr.borrow());
+                for e in [x, y, z].iter() {
+                    if let Some(e) = e {
+                        res = format!("ap {} {}", res, e.expr.borrow());
+                    }
                 }
                 write!(f, "{}", res)
             }
@@ -348,7 +342,7 @@ fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<It
         "ap" => Ap(parse(env, &mut it).into(), parse(env, &mut it).into()),
         s => {
             if let Some(p) = STR_PRIMITIVE.get(s) {
-                Op(*p, vec![]).into()
+                Expr::op(*p).into()
             } else if let Ok(i) = s.parse::<i64>() {
                 Num(i)
             } else if env.contains_key(s) || s.chars().next().unwrap() == ':' || s.chars().next().unwrap() == 'x' {
