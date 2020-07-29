@@ -24,7 +24,7 @@ use typed_arena::Arena;
 use wasm_bindgen::prelude::*;
 
 lazy_static! {
-    static ref API_KEY: Mutex<String> = Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
+    pub static ref API_KEY: Mutex<String> = Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
     static ref STR_PRIMITIVE: HashMap<&'static str, Primitive> = {
         use Primitive::*;
         let mut m = HashMap::new();
@@ -96,8 +96,7 @@ use Expr::*;
 impl Into<CachedExpr> for Expr {
     fn into(self) -> CachedExpr {
         CachedExpr {
-            expr: Rc::new(RefCell::new(self)),
-            cached: Rc::new(RefCell::new(false)),
+            cache: Rc::new(RefCell::new(Cache { expr: self, state: 0 })),
         }
     }
 }
@@ -113,34 +112,42 @@ impl Expr {
     fn op(p: Primitive) -> Expr {
         Op(p, None, None, None)
     }
+
+    fn reduce(self, env: &Env) -> Expr {
+        match self {
+            Op(p, x, y, z) => Op(p, x.map(|e| e.reduce(env).into()), y.map(|e| e.reduce(env).into()), z.map(|e| e.reduce(env).into())),
+            x @ Num(_) => x,
+            x => x.eval(env).reduce(env),
+        }
+    }
     fn eval(self, env: &Env) -> Expr {
         use Primitive::*;
 
         match self {
-            Ap(l, r) => match &*l.eval(env) {
-                Op(name, None, _, _) => Op(*name, Some(r), None, None),
-                Op(name, x, None, _) => Op(*name, x.clone(), Some(r), None),
-                Op(name, x, y, None) => Op(*name, x.clone(), y.clone(), Some(r)),
+            Ap(l, r) => match l.eval(env) {
+                Op(name, None, _, _) => Op(name, Some(r), None, None),
+                Op(name, x, None, _) => Op(name, x.clone(), Some(r), None),
+                Op(name, x, y, None) => Op(name, x.clone(), y.clone(), Some(r)),
                 _ => panic!("unexpected lhs: {:?}", l),
             }
             .eval(env),
-            Var(name) => env.get(&name).unwrap().clone().eval(env),
             Op(B, Some(x), Some(y), Some(z)) => Ap(x, Ap(y, z).into()).eval(env),
             Op(C, Some(x), Some(y), Some(z)) => Ap(Ap(x, z).into(), y).eval(env),
             Op(S, Some(x), Some(y), Some(z)) => Ap(Ap(x, z.clone()).into(), Ap(y, z).into()).eval(env),
+            Op(Cons, Some(x), Some(y), Some(z)) => Ap(Ap(z, x).into(), y).eval(env),
 
-            Op(I, Some(x), _, _) => x.eval(env).clone(),
+            Op(I, Some(x), _, _) => x.eval(env),
             Op(Car, Some(x), _, _) => Ap(x, Expr::boolean(true).into()).eval(env),
             Op(Cdr, Some(x), _, _) => Ap(x, Expr::boolean(false).into()).eval(env),
             Op(Neg, Some(x), _, _) => Num(-x.eval(env).must_num()),
-            Op(Nil, Some(_), _, _) => Expr::boolean(true).eval(env),
-            Op(Isnil, Some(x), _, _) => match &*x.eval(env) {
-                Op(Nil, None, _, _) => Expr::boolean(true).eval(env),
-                Op(Cons, Some(_), Some(_), None) => Expr::boolean(false).eval(env),
+            Op(Nil, Some(_), _, _) => Expr::boolean(true),
+            Op(Isnil, Some(x), _, _) => match x.eval(env) {
+                Op(Nil, None, _, _) => Expr::boolean(true),
+                Op(Cons, Some(_), Some(_), None) => Expr::boolean(false),
                 _ => panic!("unexpected x: {:?}", x),
             },
-            Op(T, Some(x), Some(_), _) => x.eval(env).clone(),
-            Op(F, Some(_), Some(y), _) => y.eval(env).clone(),
+            Op(T, Some(x), Some(_), _) => x.eval(env),
+            Op(F, Some(_), Some(y), _) => y.eval(env),
 
             Op(Add, Some(x), Some(y), _) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
             Op(Mul, Some(x), Some(y), _) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
@@ -148,7 +155,7 @@ impl Expr {
             Op(Eq, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
             Op(Lt, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
 
-            Op(Cons, Some(x), Some(y), Some(z)) => Ap(Ap(z, x).into(), y).eval(env),
+            Var(name) => env.get(&name).unwrap().clone().eval(env),
             _ => self,
         }
     }
@@ -159,32 +166,27 @@ impl Expr {
             _ => panic!("not a num: {}", self),
         }
     }
-    fn must_list_rev(self, env: &Env) -> Vec<Expr> {
-        let e = self.eval(env);
-        match e {
+    fn must_list_rev(&self) -> Vec<Expr> {
+        match self {
             Op(Primitive::Nil, None, _, _) => vec![],
             Op(Primitive::Cons, Some(x0), Some(x1), None) => {
-                let mut res = x1.eval(&env).clone().must_list_rev(env);
-                res.push(x0.expr.borrow().clone());
+                let mut res = x1.expr().must_list_rev();
+                res.push(x0.expr());
                 res
             }
             _ => panic!("not list"),
         }
     }
-    fn must_list(self, env: &Env) -> Vec<Expr> {
-        self.must_list_rev(env).into_iter().rev().collect()
+    fn must_list(&self) -> Vec<Expr> {
+        self.must_list_rev().into_iter().rev().collect()
     }
-    fn must_point(self, env: &Env) -> (i64, i64) {
-        let e = self.eval(env);
-        match e {
-            Op(Primitive::Cons, Some(x), Some(y), None) => {
-                let x = x.eval(env);
-                let y = y.eval(env);
-                (x.must_num(), y.must_num())
-            }
+    fn must_point(&self) -> (i64, i64) {
+        match self {
+            Op(Primitive::Cons, Some(x), Some(y), None) => (x.expr().must_num(), y.expr().must_num()),
             _ => panic!("not vec"),
         }
     }
+
     fn cons(hd: CachedExpr, tl: CachedExpr) -> Expr {
         Op(Primitive::Cons, Some(hd), Some(tl), None)
     }
@@ -192,19 +194,13 @@ impl Expr {
         Expr::op(Primitive::Nil)
     }
 
-    fn demod(self, env: &Env) -> Expr {
-        Expr::demodulate(&self.modulate(env))
-    }
-
-    fn modulate(self, env: &Env) -> String {
-        let e = self.eval(env);
-
-        match e {
+    fn modulate(&self) -> String {
+        match self {
             Num(n) => {
                 let mut res = String::new();
-                let n = if n >= 0 {
+                let n = if *n >= 0 {
                     res.push_str("01");
-                    n
+                    *n
                 } else {
                     res.push_str("10");
                     n.abs()
@@ -223,10 +219,10 @@ impl Expr {
                 }
                 res
             }
-            _ => match e {
+            _ => match self {
                 Op(Primitive::Nil, None, _, _) => "00".into(),
-                Op(Primitive::Cons, Some(hd), Some(tl), None) => "11".to_string() + &hd.eval(env).clone().modulate(env) + &tl.expr.borrow().clone().modulate(env),
-                _ => panic!("unexpected op {}", e),
+                Op(Primitive::Cons, Some(hd), Some(tl), None) => "11".to_owned() + &hd.expr().modulate() + &tl.expr().modulate(),
+                _ => panic!("unexpected op {}", self),
             },
         }
     }
@@ -261,8 +257,20 @@ impl Expr {
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 struct CachedExpr {
-    expr: Rc<RefCell<Expr>>,
-    cached: Rc<RefCell<bool>>,
+    cache: Rc<RefCell<Cache>>,
+}
+#[derive(Clone, Eq, PartialEq, Debug)]
+
+struct Cache {
+    expr: Expr,
+    state: u8, // 1: cached, 2: reduced
+}
+
+impl std::ops::Deref for Cache {
+    type Target = Expr;
+    fn deref(&self) -> &Self::Target {
+        &self.expr
+    }
 }
 
 type Env = HashMap<String, Expr>;
@@ -281,24 +289,40 @@ fn default_env() -> Env {
 }
 
 impl CachedExpr {
-    fn eval(&self, env: &Env) -> std::cell::Ref<Expr> {
-        if !self.cached.replace(true) {
-            let expr = self.expr.borrow().clone().eval(env);
-            self.expr.replace(expr);
+    fn eval(&self, env: &Env) -> Expr {
+        let mut state = self.cache.borrow().state;
+        if state == 0 {
+            let expr = { self.cache.borrow().expr.clone().eval(env) };
+            {
+                self.cache.borrow_mut().expr = expr
+            };
         }
-        self.expr.borrow()
+        self.cache.borrow().expr.clone()
+    }
+    fn reduce(&self, env: &Env) -> Expr {
+        let mut state = self.cache.borrow().state;
+        if state < 2 {
+            let expr = { self.cache.borrow().expr.clone().reduce(env) };
+            {
+                self.cache.borrow_mut().expr = expr
+            };
+        }
+        self.cache.borrow().expr.clone()
+    }
+    fn expr(&self) -> Expr {
+        self.cache.borrow().expr.clone()
     }
 }
 
 impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Ap(l, r) => write!(f, "ap {} {}", l.expr.borrow(), r.expr.borrow()),
+            Expr::Ap(l, r) => write!(f, "ap {} {}", l.expr().to_string(), r.expr().to_string()),
             Expr::Op(s, x, y, z) => {
                 let mut res = format!("{}", s);
                 for e in [x, y, z].iter() {
                     if let Some(e) = e {
-                        res = format!("ap {} {}", res, e.expr.borrow());
+                        res = format!("ap {} {}", res, e.expr().to_string());
                     }
                 }
                 write!(f, "{}", res)
@@ -417,20 +441,20 @@ impl G {
             let input = format!("ap ap {} {} {}", protocol, state, vector);
             let expr = parse_string(&self.env, &input);
             let (flag, new_state, data) = {
-                let e = expr.eval(&self.env);
-                let mut v = e.must_list(&self.env);
+                let e = expr.reduce(&self.env);
+                let mut v = e.must_list();
                 (v.remove(0), v.remove(0), v.remove(0))
             };
 
-            state = format!("{}", new_state.demod(env));
+            state = format!("{}", new_state);
             match flag.must_num() {
                 0 => {
                     return InteractResult {
                         state,
                         images: data
-                            .must_list(env)
+                            .must_list()
                             .into_iter()
-                            .map(|l| l.must_list(env).into_iter().map(|v| v.must_point(env)).collect::<Vec<_>>())
+                            .map(|l| l.must_list().into_iter().map(|v| v.must_point()).collect::<Vec<_>>())
                             .map(|mut l| {
                                 l.sort();
                                 l
@@ -446,6 +470,29 @@ impl G {
             }
         }
     }
+}
+
+fn send_url(api_key: &str) -> String {
+    format!("https://icfpc2020-api.testkontur.ru/aliens/send?apiKey={}", api_key)
+}
+
+fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
+    let req = req.clone().modulate();
+    Expr::demodulate(&request(dbg!(&send_url(api_key)), req))
+}
+
+#[cfg(target_os = "linux")]
+fn request(url: &str, req: String) -> String {
+    let client = reqwest::blocking::Client::new();
+    dbg!(client.post(url).body(dbg!(req)).send().unwrap().text().unwrap())
+}
+
+#[wasm_bindgen(module = "/define.js")]
+#[cfg(target_arch = "wasm32")]
+extern "C" {
+    fn name() -> String;
+
+    fn request(url: &str, req: String) -> String;
 }
 
 #[cfg(test)]
@@ -574,8 +621,8 @@ mod tests {
             eprintln!("e1: {}", e1);
             eprintln!("e2: {}", e2);
 
-            let e1 = e1.eval(&env).demod(&env);
-            let e2 = e2.eval(&env).demod(&env);
+            let e1 = e1.reduce(&env);
+            let e2 = e2.reduce(&env);
 
             eprintln!("e1.eval: {}", e1);
             eprintln!("e2.eval: {}", e2);
@@ -600,15 +647,15 @@ mod tests {
         {
             let e1 = parse_string(&env, tc.1);
             eprintln!("e1: {}", e1);
-            let e1 = e1.eval(&env).demod(&env);
-            let bin = e1.modulate(&env);
+            let e1 = e1.reduce(&env);
+            let bin = e1.modulate();
 
             assert_eq!(tc.0, bin);
         }
     }
 
     #[test]
-    fn test_modulate() {
+    fn test_demodulate() {
         let env = default_env();
 
         for tc in [
@@ -618,40 +665,19 @@ mod tests {
             ("1101000", "( 0 )"),
             ("01100001", "1"),
             ("10100001", "-1"),
+            (
+                "1101100001111111011000011101111111111111111100100100010011000101110101000111101110101110100100110100101001001000000",
+                "ap ap cons 1 ap ap cons ap ap cons ap ap cons 1 ap ap cons 5231136092510644553 nil nil nil",
+            ),
         ]
         .iter()
         {
             let e1 = Expr::demodulate(tc.0);
-            let e2 = parse_string(&env, tc.1);
+            let e2 = parse_string(&env, tc.1).reduce(&env);
 
             eprintln!("e1: {}", e1);
             eprintln!("e2: {}", e2);
-
             assert_eq!(e1, e2);
         }
     }
-}
-
-fn send_url(api_key: &str) -> String {
-    format!("https://icfpc2020-api.testkontur.ru/aliens/send?apiKey={}", api_key)
-}
-
-fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
-    eprintln!("sending: {}", req);
-    let req = req.clone().modulate(env);
-    Expr::demodulate(&request(&send_url(api_key), req))
-}
-
-#[cfg(target_os = "linux")]
-fn request(url: &str, req: String) -> String {
-    let client = reqwest::blocking::Client::new();
-    client.post(url).body(req).send().unwrap().text().unwrap()
-}
-
-#[wasm_bindgen(module = "/define.js")]
-#[cfg(target_arch = "wasm32")]
-extern "C" {
-    fn name() -> String;
-
-    fn request(url: &str, req: String) -> String;
 }
