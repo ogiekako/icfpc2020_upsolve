@@ -115,7 +115,12 @@ impl Expr {
 
     fn reduce(self, env: &Env) -> Expr {
         match self {
-            Op(p, x, y, z) => Op(p, x.map(|e| e.reduce(env).into()), y.map(|e| e.reduce(env).into()), z.map(|e| e.reduce(env).into())),
+            Op(p, x, y, z) => Op(
+                p,
+                x.map(|e| e.reduce(env).into()),
+                y.map(|e| e.reduce(env).into()),
+                z.map(|e| e.reduce(env).into()),
+            ),
             x @ Num(_) => x,
             x => x.eval(env).reduce(env),
         }
