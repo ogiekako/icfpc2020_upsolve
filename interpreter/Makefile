@@ -1,9 +1,10 @@
 build:
-	wasm-pack build --release
+	wasm-pack build --release; \
+	( cd www; npx webpack )
 
 run: build
 	cd www; \
-	npx webpack-dev-server --host 0.0.0.0
+	npm start
 
 init:
 	npm init wasm-app www

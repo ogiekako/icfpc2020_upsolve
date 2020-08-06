@@ -112,7 +112,6 @@ impl Expr {
     fn op(p: Primitive) -> Expr {
         Op(p, None, None, None)
     }
-
     fn reduce(self, env: &Env) -> Expr {
         match self {
             Op(p, x, y, z) => Op(
