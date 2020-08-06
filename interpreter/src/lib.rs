@@ -477,7 +477,7 @@ impl G {
 }
 
 fn send_url(api_key: &str) -> String {
-    format!("https://icfpc2020-api.testkontur.ru/aliens/send?apiKey={}", api_key)
+    format!("https://api.pegovka.space/aliens/send?apiKey={}", api_key)
 }
 
 fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
