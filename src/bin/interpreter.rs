@@ -1,23 +1,22 @@
 #![allow(unused)]
 
-extern crate interpreter;
-
-// extern crate clap;
-
-use interpreter::*;
+use app::galaxy::*;
 
 use anyhow::{anyhow, bail, Result};
 use std::io::Read;
 
 fn main() {
-    let child = std::thread::Builder::new().stack_size(256 * 1024 * 1024).spawn(move || run()).unwrap();
+    let child = std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(move || run())
+        .unwrap();
     child.join().unwrap();
 }
 
 fn run() {
     let start = std::time::Instant::now();
 
-    let g = interpreter::G::new();
+    let g = G::new();
 
     let state =  "ap ap cons 3 ap ap cons ap ap cons 0 ap ap cons ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 ap ap cons 0 nil ap ap cons nil ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil";
     let vector = (0, 0);
@@ -27,7 +26,14 @@ fn run() {
     // let vector = (18, 3);
     // let want_state: Option<&str> = None;
 
-    let next_state = g.galaxy(state.into(), vector.0, vector.1, interpreter::API_KEY.lock().unwrap().as_str()).state();
+    let next_state = g
+        .galaxy(
+            state.into(),
+            vector.0,
+            vector.1,
+            API_KEY.lock().unwrap().as_str(),
+        )
+        .state();
 
     if let Some(want_state) = want_state {
         assert_eq!(next_state, want_state);

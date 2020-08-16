@@ -1,5 +1,5 @@
 [package]
-name = "icfpc2020_upsolve"
+name = "app"
 version = "0.0.1"
 edition = "2018"
 

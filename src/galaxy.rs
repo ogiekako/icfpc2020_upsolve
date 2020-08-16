@@ -24,7 +24,8 @@ use typed_arena::Arena;
 use wasm_bindgen::prelude::*;
 
 lazy_static! {
-    pub static ref API_KEY: Mutex<String> = Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
+    pub static ref API_KEY: Mutex<String> =
+        Mutex::new(std::env::var("API_KEY").unwrap_or(String::new()));
     static ref STR_PRIMITIVE: HashMap<&'static str, Primitive> = {
         use Primitive::*;
         let mut m = HashMap::new();
@@ -59,30 +60,35 @@ lazy_static! {
 #[derive(Clone, Eq, PartialEq, Debug)]
 enum Expr {
     Ap(CachedExpr, CachedExpr),
-    Op(Primitive, Option<CachedExpr>, Option<CachedExpr>, Option<CachedExpr>),
+    Op(
+        Primitive,
+        Option<CachedExpr>,
+        Option<CachedExpr>,
+        Option<CachedExpr>,
+    ),
     Num(i64),
     Var(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum Primitive {
-    Add,
-    Mul,
-    Div,
-    Eq,
-    Lt,
-    Neg,
-    S,
-    C,
-    B,
-    I,
-    F,
-    T,
-    Cons,
-    Car,
-    Cdr,
-    Nil,
-    Isnil,
+    Add,   // x y   => x + y
+    Mul,   // x y   => x * y
+    Div,   // x y   => x / y
+    Eq,    // x y   => x == y
+    Lt,    // x y   => x <= y
+    Neg,   // x     => -x
+    S,     // x y z => (x z) (y z)  !
+    C,     // x y z => (x z) y
+    B,     // x y z => x (y z)
+    I,     // x     => x
+    F,     // x y   => y  !
+    T,     // x y   => x  !
+    Cons,  // x y z => (z x) y
+    Car,   // x     => x T
+    Cdr,   // x     => x F
+    Nil,   // x     => T
+    Isnil, // x     => x == Nil ? T : F
 }
 
 impl Display for Primitive {
@@ -96,7 +102,10 @@ use Expr::*;
 impl Into<CachedExpr> for Expr {
     fn into(self) -> CachedExpr {
         CachedExpr {
-            cache: Rc::new(RefCell::new(Cache { expr: self, state: 0 })),
+            cache: Rc::new(RefCell::new(Cache {
+                expr: self,
+                state: 0,
+            })),
         }
     }
 }
@@ -137,7 +146,9 @@ impl Expr {
             .eval(env),
             Op(B, Some(x), Some(y), Some(z)) => Ap(x, Ap(y, z).into()).eval(env),
             Op(C, Some(x), Some(y), Some(z)) => Ap(Ap(x, z).into(), y).eval(env),
-            Op(S, Some(x), Some(y), Some(z)) => Ap(Ap(x, z.clone()).into(), Ap(y, z).into()).eval(env),
+            Op(S, Some(x), Some(y), Some(z)) => {
+                Ap(Ap(x, z.clone()).into(), Ap(y, z).into()).eval(env)
+            }
             Op(Cons, Some(x), Some(y), Some(z)) => Ap(Ap(z, x).into(), y).eval(env),
 
             Op(I, Some(x), _, _) => x.eval(env),
@@ -156,8 +167,12 @@ impl Expr {
             Op(Add, Some(x), Some(y), _) => Num(x.eval(env).must_num() + y.eval(env).must_num()),
             Op(Mul, Some(x), Some(y), _) => Num(x.eval(env).must_num() * y.eval(env).must_num()),
             Op(Div, Some(x), Some(y), _) => Num(x.eval(env).must_num() / y.eval(env).must_num()),
-            Op(Eq, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num()),
-            Op(Lt, Some(x), Some(y), _) => Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num()),
+            Op(Eq, Some(x), Some(y), _) => {
+                Expr::boolean(x.eval(env).must_num() == y.eval(env).must_num())
+            }
+            Op(Lt, Some(x), Some(y), _) => {
+                Expr::boolean(x.eval(env).must_num() < y.eval(env).must_num())
+            }
 
             Var(name) => env.get(&name).unwrap().clone().eval(env),
             _ => self,
@@ -186,7 +201,9 @@ impl Expr {
     }
     fn must_point(&self) -> (i64, i64) {
         match self {
-            Op(Primitive::Cons, Some(x), Some(y), None) => (x.expr().must_num(), y.expr().must_num()),
+            Op(Primitive::Cons, Some(x), Some(y), None) => {
+                (x.expr().must_num(), y.expr().must_num())
+            }
             _ => panic!("not vec"),
         }
     }
@@ -225,7 +242,9 @@ impl Expr {
             }
             _ => match self {
                 Op(Primitive::Nil, None, _, _) => "00".into(),
-                Op(Primitive::Cons, Some(hd), Some(tl), None) => "11".to_owned() + &hd.expr().modulate() + &tl.expr().modulate(),
+                Op(Primitive::Cons, Some(hd), Some(tl), None) => {
+                    "11".to_owned() + &hd.expr().modulate() + &tl.expr().modulate()
+                }
                 _ => panic!("unexpected op {}", self),
             },
         }
@@ -338,10 +357,16 @@ impl std::fmt::Display for Expr {
 }
 
 fn parse_string(env: &Env, expr: &str) -> Expr {
-    parse(env, &mut expr.split(" ").map(String::from).into_iter().peekable())
+    parse(
+        env,
+        &mut expr.split(" ").map(String::from).into_iter().peekable(),
+    )
 }
 
-fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<Item = String>>) -> Expr {
+fn parse(
+    env: &Env,
+    mut it: &mut std::iter::Peekable<impl std::iter::Iterator<Item = String>>,
+) -> Expr {
     use Expr::*;
 
     let mut s: &str = &it.next().expect("iterator exhausted");
@@ -373,7 +398,10 @@ fn parse(env: &Env, mut it: &mut std::iter::Peekable<impl std::iter::Iterator<It
                 Expr::op(*p).into()
             } else if let Ok(i) = s.parse::<i64>() {
                 Num(i)
-            } else if env.contains_key(s) || s.chars().next().unwrap() == ':' || s.chars().next().unwrap() == 'x' {
+            } else if env.contains_key(s)
+                || s.chars().next().unwrap() == ':'
+                || s.chars().next().unwrap() == 'x'
+            {
                 Var(s.to_string())
             } else {
                 panic!("unknown var {}", s);
@@ -398,7 +426,13 @@ impl InteractResult {
     }
     pub fn image(&self, i: usize) -> Image {
         Image {
-            img: self.images[i].iter().map(|p| Point { x: p.0 as _, y: p.1 as _ }).collect(),
+            img: self.images[i]
+                .iter()
+                .map(|p| Point {
+                    x: p.0 as _,
+                    y: p.1 as _,
+                })
+                .collect(),
         }
     }
 }
@@ -438,7 +472,14 @@ impl G {
     pub fn galaxy(&self, mut state: String, x: i32, y: i32, api_key: &str) -> InteractResult {
         self.interact("galaxy", state, x, y, api_key)
     }
-    fn interact(&self, protocol: &str, mut state: String, x: i32, y: i32, api_key: &str) -> InteractResult {
+    fn interact(
+        &self,
+        protocol: &str,
+        mut state: String,
+        x: i32,
+        y: i32,
+        api_key: &str,
+    ) -> InteractResult {
         let env = &self.env;
         let mut vector = format!("ap ap vec {} {}", x, y);
         loop {
@@ -458,7 +499,12 @@ impl G {
                         images: data
                             .must_list()
                             .into_iter()
-                            .map(|l| l.must_list().into_iter().map(|v| v.must_point()).collect::<Vec<_>>())
+                            .map(|l| {
+                                l.must_list()
+                                    .into_iter()
+                                    .map(|v| v.must_point())
+                                    .collect::<Vec<_>>()
+                            })
                             .map(|mut l| {
                                 l.sort();
                                 l
@@ -488,7 +534,13 @@ fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
 #[cfg(target_os = "linux")]
 fn request(url: &str, req: String) -> String {
     let client = reqwest::blocking::Client::new();
-    dbg!(client.post(url).body(dbg!(req)).send().unwrap().text().unwrap())
+    dbg!(client
+        .post(url)
+        .body(dbg!(req))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap())
 }
 
 #[wasm_bindgen(module = "/define.js")]
@@ -587,7 +639,12 @@ mod tests {
                 ],
             ),
         ] {
-            let res = g.galaxy(tc.0.to_string(), (tc.1).0, (tc.1).1, API_KEY.lock().unwrap().as_str());
+            let res = g.galaxy(
+                tc.0.to_string(),
+                (tc.1).0,
+                (tc.1).1,
+                API_KEY.lock().unwrap().as_str(),
+            );
             assert_eq!(res.state, tc.2);
             assert_eq!(res.images, tc.3);
         }
@@ -640,7 +697,10 @@ mod tests {
         let env = default_env();
 
         for tc in [
-            ("110110000111011111100001001111110100110000", "( 1 , 81740 )"),
+            (
+                "110110000111011111100001001111110100110000",
+                "( 1 , 81740 )",
+            ),
             ("010", "0"),
             ("00", "nil"),
             ("1101000", "( 0 )"),
