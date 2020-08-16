@@ -1,7 +1,6 @@
 [package]
-name = "interpreter"
-version = "0.1.0"
-authors = ["Keigo Oka <ogiekako@gmail.com>"]
+name = "icfpc2020_upsolve"
+version = "0.0.1"
 edition = "2018"
 
 [lib]
