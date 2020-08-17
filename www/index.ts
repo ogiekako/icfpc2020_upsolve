@@ -1,5 +1,3 @@
-const wasm = import('../pkg/interpreter.js');
-
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 
@@ -24,13 +22,14 @@ keyElem.addEventListener('change', onApiKeyChanged);
 canvas.width = 800;
 canvas.height = 800;
 
-wasm.then(mod => {
+import('../pkg').then(mod => {
     let nextState = "ap ap cons 1 ap ap cons ap ap cons 11 nil ap ap cons 0 ap ap cons nil nil"
     let min = { x: 1000, y: 1000 };
     let max = { x: -1000, y: -1000 };
     let cellSize = 1;
 
-    let g = mod.G.new();
+    // let g = mod.GalaxyEvaluator.new_gen_js_evaluator();
+    let g = mod.GalaxyEvaluator.new_reduce_evaluator();
 
     function toCanvas(p: Point): Point {
         return {

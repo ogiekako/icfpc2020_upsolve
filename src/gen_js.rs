@@ -6,6 +6,7 @@ use std::{
     process::{Command, Stdio},
     str::FromStr,
 };
+use wasm_bindgen::prelude::*;
 
 pub struct GalaxyEvaluator {
     env: Env,
@@ -29,16 +30,16 @@ impl common::Evaluator for GalaxyEvaluator {
     }
 }
 
-pub struct Env(HashMap<String, Value>);
+pub struct Env(Vec<(String, Value)>);
 
 impl Env {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self(Vec::new())
     }
     pub fn add_parse(&mut self, line: &str) -> Result<()> {
         let v: Vec<_> = line.split(" = ").map(str::trim).collect();
         let name = format!("{}", v[0].parse::<Value>()?);
-        self.0.insert(name, v[1].parse()?);
+        self.0.push((name, v[1].parse()?));
         Ok(())
     }
     fn new_galaxy() -> Self {
@@ -50,11 +51,11 @@ impl Env {
     }
 }
 
-pub fn evaluate(env: &Env, expr: &Value) -> Result<String> {
-    let js = to_js_program(&env, &expr);
-
+#[cfg(target_os = "linux")]
+fn eval_js(prog: &str) -> Result<String> {
+    // for debug.
     let mut f = std::fs::File::create("/tmp/hoge.js")?;
-    write!(f, "{}", js).unwrap();
+    write!(f, "{}", prog).unwrap();
 
     let p = Command::new("node")
         // 100M.
@@ -70,6 +71,22 @@ pub fn evaluate(env: &Env, expr: &Value) -> Result<String> {
     Ok(res)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn eval_js(prog: &str) -> Result<String> {
+    Ok(js_eval_js(prog))
+}
+
+#[wasm_bindgen(module = "/js/wasm_define.js")]
+#[cfg(target_arch = "wasm32")]
+extern "C" {
+    fn js_eval_js(s: &str) -> String;
+}
+
+pub fn evaluate(env: &Env, expr: &Value) -> Result<String> {
+    let js = to_js_program(&env, &expr);
+    eval_js(&js)
+}
+
 fn to_js_program(env: &Env, expr: &Value) -> String {
     use std::fmt::Write; // for write! to work for String
 
@@ -80,8 +97,9 @@ fn to_js_program(env: &Env, expr: &Value) -> String {
     for (k, v) in env.0.iter() {
         writeln!(js, "const {} = new Lazy(() => {});", k, v).unwrap();
     }
-    writeln!(js, "const result = eval({});", expr).unwrap();
-    writeln!(js, "console.log(to_string(result));").unwrap();
+    writeln!(js, "const result = to_string(eval({}));", expr).unwrap();
+    writeln!(js, "console.log(result);").unwrap();
+    writeln!(js, "return result;");
 
     format!("{}\n{}", pre, js)
 }

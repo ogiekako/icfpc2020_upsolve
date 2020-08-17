@@ -2,12 +2,11 @@
 use crate::*;
 
 use crate::common::G;
-use crate::galaxy::Eval;
 use common::Evaluator;
 
 fn evaluators() -> Vec<Box<dyn Evaluator>> {
     vec![
-        Box::new(Eval::new()),
+        Box::new(reduce_evaluator::Eval::new()),
         Box::new(gen_js::GalaxyEvaluator::new()),
     ]
 }

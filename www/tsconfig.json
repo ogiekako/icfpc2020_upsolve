@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "target": "esnext",
+        "module": "esnext",
+        "strict": true,
+        "inlineSourceMap": true,
+        // TODO: check if they are needed.
+        "strictNullChecks": true,
+        "moduleResolution": "node",
+        "noEmit": true,
+        "esModuleInterop": true
+    }
+}

@@ -1,13 +1,7 @@
-#![allow(unused)]
-
 extern crate anyhow;
-extern crate console_error_panic_hook;
 
 extern crate itertools;
 extern crate lazy_static;
-extern crate serde;
-extern crate typed_arena;
-extern crate wasm_bindgen;
 
 #[cfg(target_os = "linux")]
 extern crate reqwest;
@@ -21,8 +15,6 @@ use std::{
     rc::Rc,
     sync::Mutex,
 };
-use typed_arena::Arena;
-use wasm_bindgen::prelude::*;
 
 lazy_static! {
     pub static ref API_KEY: Mutex<String> =
@@ -186,98 +178,11 @@ impl Expr {
             _ => panic!("not a num: {}", self),
         }
     }
-    fn must_list_rev(&self) -> Vec<Expr> {
-        match self {
-            Op(Primitive::Nil, None, _, _) => vec![],
-            Op(Primitive::Cons, Some(x0), Some(x1), None) => {
-                let mut res = x1.expr().must_list_rev();
-                res.push(x0.expr());
-                res
-            }
-            _ => panic!("not list"),
-        }
-    }
-    fn must_list(&self) -> Vec<Expr> {
-        self.must_list_rev().into_iter().rev().collect()
-    }
-    fn must_point(&self) -> (i64, i64) {
-        match self {
-            Op(Primitive::Cons, Some(x), Some(y), None) => {
-                (x.expr().must_num(), y.expr().must_num())
-            }
-            _ => panic!("not vec"),
-        }
-    }
-
     fn cons(hd: CachedExpr, tl: CachedExpr) -> Expr {
         Op(Primitive::Cons, Some(hd), Some(tl), None)
     }
     fn nil() -> Expr {
         Expr::op(Primitive::Nil)
-    }
-
-    // TODO: remove.
-    fn modulate(&self) -> String {
-        match self {
-            Num(n) => {
-                let mut res = String::new();
-                let n = if *n >= 0 {
-                    res.push_str("01");
-                    *n
-                } else {
-                    res.push_str("10");
-                    n.abs()
-                };
-
-                let keta = 64 - n.leading_zeros();
-                let t = (keta + 3) / 4;
-
-                for _ in 0..t {
-                    res.push('1');
-                }
-                res.push('0');
-
-                for i in (0..4 * t).rev() {
-                    res.push(if (n >> i & 1) == 1 { '1' } else { '0' });
-                }
-                res
-            }
-            _ => match self {
-                Op(Primitive::Nil, None, _, _) => "00".into(),
-                Op(Primitive::Cons, Some(hd), Some(tl), None) => {
-                    "11".to_owned() + &hd.expr().modulate() + &tl.expr().modulate()
-                }
-                _ => panic!("unexpected op {}", self),
-            },
-        }
-    }
-    // TODO: remove.
-    fn demodulate(s: &str) -> Expr {
-        Expr::demodulate_iter(&mut s.chars().map(|c| c == '1'))
-    }
-    fn demodulate_iter(it: &mut impl Iterator<Item = bool>) -> Expr {
-        let t0 = it.next().unwrap();
-        let t1 = it.next().unwrap();
-
-        match (t0, t1) {
-            (false, false) => Expr::nil(),
-            (true, true) => {
-                let x = Expr::demodulate_iter(it);
-                let y = Expr::demodulate_iter(it);
-                Expr::cons(x.into(), y.into())
-            }
-            (_, pos) => {
-                let mut t = 0;
-                while it.next().unwrap() {
-                    t += 1;
-                }
-                let mut v = 0;
-                for i in (0..4 * t).rev() {
-                    v |= (if it.next().unwrap() { 1 } else { 0 }) << i;
-                }
-                Num(if pos { v } else { -v })
-            }
-        }
     }
 }
 
@@ -316,7 +221,7 @@ fn default_env() -> Env {
 
 impl CachedExpr {
     fn eval(&self, env: &Env) -> Expr {
-        let mut state = self.cache.borrow().state;
+        let state = self.cache.borrow().state;
         if state == 0 {
             let expr = { self.cache.borrow().expr.clone().eval(env) };
             {
@@ -326,7 +231,7 @@ impl CachedExpr {
         self.cache.borrow().expr.clone()
     }
     fn reduce(&self, env: &Env) -> Expr {
-        let mut state = self.cache.borrow().state;
+        let state = self.cache.borrow().state;
         if state < 2 {
             let expr = { self.cache.borrow().expr.clone().reduce(env) };
             {
@@ -491,59 +396,6 @@ mod tests {
             eprintln!("e1.eval: {}", e1);
             eprintln!("e2.eval: {}", e2);
 
-            assert_eq!(e1, e2);
-        }
-    }
-
-    #[test]
-    fn test_demod() {
-        let env = default_env();
-
-        for tc in [
-            (
-                "110110000111011111100001001111110100110000",
-                "( 1 , 81740 )",
-            ),
-            ("010", "0"),
-            ("00", "nil"),
-            ("1101000", "( 0 )"),
-            ("01100001", "1"),
-            ("10100001", "-1"),
-        ]
-        .iter()
-        {
-            let e1 = parse_string(&env, tc.1);
-            eprintln!("e1: {}", e1);
-            let e1 = e1.reduce(&env);
-            let bin = e1.modulate();
-
-            assert_eq!(tc.0, bin);
-        }
-    }
-
-    #[test]
-    fn test_demodulate() {
-        let env = default_env();
-
-        for tc in [
-            ("110110000111011111100001001111110100110000", "( 1 , 81740 )"),
-            ("010", "0"),
-            ("00", "nil"),
-            ("1101000", "( 0 )"),
-            ("01100001", "1"),
-            ("10100001", "-1"),
-            (
-                "1101100001111111011000011101111111111111111100100100010011000101110101000111101110101110100100110100101001001000000",
-                "ap ap cons 1 ap ap cons ap ap cons ap ap cons 1 ap ap cons 5231136092510644553 nil nil nil",
-            ),
-        ]
-        .iter()
-        {
-            let e1 = Expr::demodulate(tc.0);
-            let e2 = parse_string(&env, tc.1).reduce(&env);
-
-            eprintln!("e1: {}", e1);
-            eprintln!("e2: {}", e2);
             assert_eq!(e1, e2);
         }
     }

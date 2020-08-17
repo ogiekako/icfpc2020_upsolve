@@ -5,6 +5,7 @@ extern crate wasm_bindgen;
 use anyhow::*;
 use std::{fmt::Formatter, str::FromStr};
 use wasm_bindgen::prelude::*;
+
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub struct Point {
@@ -263,7 +264,7 @@ pub fn request(url: &str, req: String) -> String {
         .unwrap())
 }
 
-#[wasm_bindgen(module = "/define.js")]
+#[wasm_bindgen(module = "/js/wasm_define.js")]
 #[cfg(target_arch = "wasm32")]
 extern "C" {
     fn name() -> String;

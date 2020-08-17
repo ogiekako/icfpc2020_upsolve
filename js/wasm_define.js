@@ -12,3 +12,7 @@ export function request(url, req) {
     console.log("response", xhr.responseText);
     return xhr.responseText;
 }
+
+export function js_eval_js(prog) {
+    return Function(prog)();
+}

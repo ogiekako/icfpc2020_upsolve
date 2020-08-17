@@ -12,8 +12,11 @@ module.exports = {
     rules: [
       {
         test: /\.ts$/,
-        use: 'ts-loader',
-        exclude: /node_modules/
+        loader: 'ts-loader',
+        // TODO: check the meaning of this flag.
+        options: {
+          transpileOnly: true,
+        }
       }
     ]
   },
@@ -29,10 +32,12 @@ module.exports = {
         { from: 'index.html', to: 'index.html' }
       ]
     ),
+    // TODO: this plugin creates www/pkg meaniglessly. Check why.
     new WasmPackPlugin({
-      crateDirectory: path.join(__dirname, "..")
+      crateDirectory: path.resolve(__dirname, "..")
     })
   ],
+
   devServer: {
     contentBase: distDir,
     inline: false,
