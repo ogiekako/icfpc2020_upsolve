@@ -12,6 +12,7 @@ extern crate wasm_bindgen;
 #[cfg(target_os = "linux")]
 extern crate reqwest;
 
+use crate::common::{self, Node};
 use lazy_static::lazy_static;
 use std::{
     cell::RefCell,
@@ -58,7 +59,7 @@ lazy_static! {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-enum Expr {
+pub enum Expr {
     Ap(CachedExpr, CachedExpr),
     Op(
         Primitive,
@@ -71,7 +72,7 @@ enum Expr {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum Primitive {
+pub enum Primitive {
     Add,   // x y   => x + y
     Mul,   // x y   => x * y
     Div,   // x y   => x / y
@@ -215,6 +216,7 @@ impl Expr {
         Expr::op(Primitive::Nil)
     }
 
+    // TODO: remove.
     fn modulate(&self) -> String {
         match self {
             Num(n) => {
@@ -249,6 +251,7 @@ impl Expr {
             },
         }
     }
+    // TODO: remove.
     fn demodulate(s: &str) -> Expr {
         Expr::demodulate_iter(&mut s.chars().map(|c| c == '1'))
     }
@@ -279,7 +282,7 @@ impl Expr {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-struct CachedExpr {
+pub struct CachedExpr {
     cache: Rc<RefCell<Cache>>,
 }
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -356,7 +359,7 @@ impl std::fmt::Display for Expr {
     }
 }
 
-fn parse_string(env: &Env, expr: &str) -> Expr {
+pub(crate) fn parse_string(env: &Env, expr: &str) -> Expr {
     parse(
         env,
         &mut expr.split(" ").map(String::from).into_iter().peekable(),
@@ -410,245 +413,45 @@ fn parse(
     }
 }
 
-#[wasm_bindgen]
-pub struct InteractResult {
-    state: String,
-    images: Vec<Vec<(i64, i64)>>,
+pub struct Eval {
+    pub(crate) env: Env,
 }
 
-#[wasm_bindgen]
-impl InteractResult {
-    pub fn state(&self) -> String {
-        self.state.clone()
-    }
-    pub fn image_count(&self) -> usize {
-        self.images.len()
-    }
-    pub fn image(&self, i: usize) -> Image {
-        Image {
-            img: self.images[i]
-                .iter()
-                .map(|p| Point {
-                    x: p.0 as _,
-                    y: p.1 as _,
-                })
-                .collect(),
-        }
+impl Eval {
+    pub fn new() -> Self {
+        Eval { env: default_env() }
     }
 }
 
-#[wasm_bindgen]
-pub struct Image {
-    img: Vec<Point>,
-}
-
-#[wasm_bindgen]
-impl Image {
-    pub fn count(&self) -> usize {
-        self.img.len()
+impl crate::common::Evaluator for Eval {
+    fn evaluate(&self, expr: &str) -> Node {
+        let expr = parse_string(&self.env, expr);
+        expr_to_node(expr.reduce(&self.env))
     }
-    pub fn point(&self, i: usize) -> Point {
-        self.img[i]
+    fn add_def(&mut self, line: &str) {
+        let ss = line.split(" = ").collect::<Vec<_>>();
+        let (name, expr) = (ss[0], ss[1]);
+        let e = parse_string(&self.env, expr);
+        self.env.insert(name.to_string(), e);
     }
 }
 
-#[wasm_bindgen]
-#[derive(Clone, Copy)]
-pub struct Point {
-    pub x: i32,
-    pub y: i32,
-}
-
-#[wasm_bindgen]
-pub struct G {
-    env: Env,
-}
-
-#[wasm_bindgen]
-impl G {
-    pub fn new() -> G {
-        G { env: default_env() }
+fn expr_to_node(e: Expr) -> Node {
+    match e {
+        Op(Primitive::Nil, None, _, _) => Node::Nil,
+        Op(Primitive::Cons, Some(x0), Some(x1), None) => Node::Cons(
+            expr_to_node(x0.expr()).into(),
+            expr_to_node(x1.expr()).into(),
+        ),
+        Num(x) => Node::Num(x),
+        _ => panic!("unconvertible to node: {}", e),
     }
-    pub fn galaxy(&self, mut state: String, x: i32, y: i32, api_key: &str) -> InteractResult {
-        self.interact("galaxy", state, x, y, api_key)
-    }
-    fn interact(
-        &self,
-        protocol: &str,
-        mut state: String,
-        x: i32,
-        y: i32,
-        api_key: &str,
-    ) -> InteractResult {
-        let env = &self.env;
-        let mut vector = format!("ap ap vec {} {}", x, y);
-        loop {
-            let input = format!("ap ap {} {} {}", protocol, state, vector);
-            let expr = parse_string(&self.env, &input);
-            let (flag, new_state, data) = {
-                let e = expr.reduce(&self.env);
-                let mut v = e.must_list();
-                (v.remove(0), v.remove(0), v.remove(0))
-            };
-
-            state = format!("{}", new_state);
-            match flag.must_num() {
-                0 => {
-                    return InteractResult {
-                        state,
-                        images: data
-                            .must_list()
-                            .into_iter()
-                            .map(|l| {
-                                l.must_list()
-                                    .into_iter()
-                                    .map(|v| v.must_point())
-                                    .collect::<Vec<_>>()
-                            })
-                            .map(|mut l| {
-                                l.sort();
-                                l
-                            })
-                            .collect(),
-                    }
-                }
-                1 => {
-                    let next_data = send(&data, env, api_key);
-                    vector = format!("{}", next_data);
-                }
-                _ => panic!("unexpected flag: {}", flag),
-            }
-        }
-    }
-}
-
-fn send_url(api_key: &str) -> String {
-    format!("https://api.pegovka.space/aliens/send?apiKey={}", api_key)
-}
-
-fn send(req: &Expr, env: &Env, api_key: &str) -> Expr {
-    let req = req.clone().modulate();
-    Expr::demodulate(&request(dbg!(&send_url(api_key)), req))
-}
-
-#[cfg(target_os = "linux")]
-fn request(url: &str, req: String) -> String {
-    let client = reqwest::blocking::Client::new();
-    dbg!(client
-        .post(url)
-        .body(dbg!(req))
-        .send()
-        .unwrap()
-        .text()
-        .unwrap())
-}
-
-#[wasm_bindgen(module = "/define.js")]
-#[cfg(target_arch = "wasm32")]
-extern "C" {
-    fn name() -> String;
-
-    fn request(url: &str, req: String) -> String;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::iter::FromIterator;
-
-    #[test]
-    fn test_statelessdraw() {
-        let mut g = G::new();
-        g.env.insert(
-            "statelessdraw".into(),
-            parse_string(
-                &g.env,
-                "ap ap c ap ap b b ap ap b ap b ap cons 0 ap ap c ap ap b b cons ap ap c cons nil ap ap c ap ap b cons ap ap c cons nil nil",
-            ),
-        );
-
-        let res = g.interact("statelessdraw", "nil".into(), 1, 0, "");
-        assert_eq!(res.state, "nil");
-        assert_eq!(res.images, vec![vec![(1, 0)]]);
-    }
-
-    #[test]
-    fn test_galaxy() {
-        let g = G::new();
-        for tc in vec![
-            (
-                "nil",
-                (0, 0),
-                "ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil",
-                vec![
-                    vec![
-                        (-3, 0),
-                        (-3, 1),
-                        (-2, -1),
-                        (-2, 2),
-                        (-1, -3),
-                        (-1, -1),
-                        (-1, 0),
-                        (-1, 3),
-                        (0, -3),
-                        (0, -1),
-                        (0, 1),
-                        (0, 3),
-                        (1, -3),
-                        (1, 0),
-                        (1, 1),
-                        (1, 3),
-                        (2, -2),
-                        (2, 1),
-                        (3, -1),
-                        (3, 0),
-                    ],
-                    vec![(-8, -2), (-7, -3)],
-                    vec![],
-                ],
-            ),
-            (
-                "ap ap cons 0 ap ap cons ap ap cons 0 nil ap ap cons 0 ap ap cons nil nil",
-                (0, 0),
-                "ap ap cons 0 ap ap cons ap ap cons 1 nil ap ap cons 0 ap ap cons nil nil",
-                vec![
-                    vec![
-                        (-3, 0),
-                        (-3, 1),
-                        (-2, -1),
-                        (-2, 2),
-                        (-1, -3),
-                        (-1, -1),
-                        (-1, 0),
-                        (-1, 3),
-                        (0, -3),
-                        (0, -1),
-                        (0, 1),
-                        (0, 3),
-                        (1, -3),
-                        (1, 0),
-                        (1, 1),
-                        (1, 3),
-                        (2, -2),
-                        (2, 1),
-                        (3, -1),
-                        (3, 0),
-                    ],
-                    vec![(-8, -2), (-7, -3), (-7, -2)],
-                    vec![],
-                ],
-            ),
-        ] {
-            let res = g.galaxy(
-                tc.0.to_string(),
-                (tc.1).0,
-                (tc.1).1,
-                API_KEY.lock().unwrap().as_str(),
-            );
-            assert_eq!(res.state, tc.2);
-            assert_eq!(res.images, tc.3);
-        }
-    }
 
     #[test]
     fn test() {
