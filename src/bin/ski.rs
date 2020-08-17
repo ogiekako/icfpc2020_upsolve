@@ -1,48 +1,91 @@
 #![allow(unused)]
 
 use anyhow::{anyhow, bail, Result};
+use std::io::BufRead;
 use std::io::Read;
+
+use itertools::Itertools;
 
 // Convert lambda expressions to SKI combinator.
 fn main() {
     let child = std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
-        .spawn(move || run())
+        .spawn(move || run().unwrap())
         .unwrap();
     child.join().unwrap();
 }
 
 fn run() -> Result<()> {
-    let expr = Term::parse(&mut std::io::stdin().bytes().map(|c| c.unwrap().into()));
-    println!("{:?}", expr.to_ski());
+    for line in std::io::stdin().lock().lines() {
+        match Term::parse(&mut line?.chars().peekable()) {
+            Ok(expr) => {
+                println!("{}", expr.to_ski());
+            }
+            Err(err) => {
+                println!("error: {:?}", err);
+            }
+        }
+    }
     Ok(())
 }
 
+#[derive(Eq, PartialEq, Debug)]
+enum Term {
+    // (t t)
+    Ap(Box<Term>, Box<Term>),
+    // \x t
+    Lambda(String, Box<Term>),
+    // x
+    Var(String),
+    // SKI
+    S,
+    K,
+    I,
+}
+
 impl Term {
-    fn parse(i: &mut impl Iterator<Item = char>) -> Term {
-        match i.next().unwrap() {
-            // TODO: check the number of )'s more strictly.
-            ')' | ' ' => Term::parse(i),
+    fn parse(i: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> Result<Term> {
+        let res = Term::parse_sub(i)?;
+        let remaining = i.collect::<String>();
+        if !remaining.is_empty() {
+            bail!("unused chars: {:?}", remaining);
+        }
+        Ok(res)
+    }
+
+    fn parse_sub(i: &mut std::iter::Peekable<impl Iterator<Item = char>>) -> Result<Term> {
+        Ok(match i.next().ok_or(anyhow!("iterator exhausted"))? {
+            ' ' => Term::parse_sub(i)?,
             '(' => {
-                let x = Term::parse(i);
-                let y = Term::parse(i);
+                let x = Term::parse_sub(i)?;
+                let y = Term::parse_sub(i)?;
+                loop {
+                    match i.next().ok_or(anyhow!("iterator exhausted (2)"))? {
+                        ' ' => (),
+                        ')' => break,
+                        c => bail!("unexpected char {}", c),
+                    }
+                }
                 Term::Ap(Box::new(x), Box::new(y))
             }
             '\\' => {
-                let v = i.take_while(|c| c.is_alphabetic()).collect::<String>();
-                let t = Term::parse(i);
+                let v = i
+                    .peeking_take_while(|c| c.is_alphabetic())
+                    .collect::<String>();
+                let t = Term::parse_sub(i)?;
                 Term::Lambda(v, Box::new(t))
             }
             'S' => Term::S,
             'K' => Term::K,
             'I' => Term::I,
-            c => {
+            c if c.is_ascii_lowercase() => {
                 let v = std::iter::once(c)
-                    .chain(i.take_while(|c| c.is_alphanumeric()))
+                    .chain({ i.peeking_take_while(|c| c.is_ascii_lowercase()) })
                     .collect::<String>();
                 Term::Var(v)
             }
-        }
+            c => bail!("unexpected char {}", c),
+        })
     }
 
     // Converts any lambda term to SKI form.
@@ -84,6 +127,19 @@ impl Term {
     }
 }
 
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Ap(x, y) => write!(f, "({} {})", x, y),
+            Term::Lambda(x, y) => write!(f, r"\{} {}", x, y),
+            Term::Var(x) => write!(f, "{}", x),
+            Term::S => write!(f, "S"),
+            Term::K => write!(f, "K"),
+            Term::I => write!(f, "I"),
+        }
+    }
+}
+
 fn has_free(t: &Term, v: &str) -> bool {
     match t {
         Term::Ap(x, y) => has_free(x, v) || has_free(y, v),
@@ -91,20 +147,6 @@ fn has_free(t: &Term, v: &str) -> bool {
         Term::Var(x) => v == x,
         _ => false,
     }
-}
-
-#[derive(Eq, PartialEq, Debug)]
-enum Term {
-    // (t t)
-    Ap(Box<Term>, Box<Term>),
-    // \x t
-    Lambda(String, Box<Term>),
-    // x
-    Var(String),
-    // SKI
-    S,
-    K,
-    I,
 }
 
 #[cfg(test)]
@@ -138,7 +180,7 @@ mod tests {
                 ),
             ),
         ] {
-            let got = Term::parse(&mut tc.0.chars());
+            let got = Term::parse(&mut tc.0.chars().peekable()).unwrap();
             assert_eq!(got, tc.1);
         }
     }
@@ -153,7 +195,7 @@ mod tests {
             (r"\y (y x)", "x", true),
         ] {
             eprintln!("{}", tc.0);
-            let t = Term::parse(&mut tc.0.chars());
+            let t = Term::parse(&mut tc.0.chars().peekable()).unwrap();
             let got = has_free(&t, tc.1);
             assert_eq!(got, tc.2);
         }
@@ -162,11 +204,16 @@ mod tests {
     #[test]
     fn test_to_ski() {
         use Term::*;
-        for tc in &[(r"\x \y (y x)", "((S (K (S I))) ((S (K K)) I))")] {
+        for tc in &[
+            (r"\x \y (y x)", "((S (K (S I))) ((S (K K)) I))"),
+            (r"(\x (x x) \x (x x))", "(((S I) I) ((S I) I))"),
+            // Y combinator
+            (r"\f (\x (f (x x)) \x (f (x x)))", "((S ((S ((S (K S)) ((S (K K)) I))) (K ((S I) I)))) ((S ((S (K S)) ((S (K K)) I))) (K ((S I) I))))"),
+        ] {
             eprintln!("{}", tc.0);
-            let t = Term::parse(&mut tc.0.chars());
+            let t = Term::parse(&mut tc.0.chars().peekable()).unwrap();
             let got = t.to_ski();
-            let want = Term::parse(&mut tc.1.chars());
+            let want = Term::parse(&mut tc.1.chars().peekable()).unwrap();
             assert_eq!(got, want);
         }
     }
