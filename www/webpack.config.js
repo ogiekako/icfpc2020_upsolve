@@ -34,10 +34,10 @@ module.exports = {
     ),
     // TODO: this plugin creates www/pkg meaniglessly. Check why.
     new WasmPackPlugin({
-      crateDirectory: path.resolve(__dirname, "..")
+      crateDirectory: path.resolve(__dirname, ".."),
+      outName: "app",
     })
   ],
-
   devServer: {
     contentBase: distDir,
     inline: false,

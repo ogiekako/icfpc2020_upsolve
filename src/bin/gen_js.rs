@@ -1,5 +1,6 @@
-use anyhow::Result;
 use app::*;
+
+use anyhow::Result;
 use std::io::prelude::*;
 
 // Convert lambda expressions to SKI combinator.

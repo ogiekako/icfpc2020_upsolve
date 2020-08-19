@@ -33,9 +33,9 @@ fn run() {
             .galaxy(state.into(), vector.0, vector.1, "".into())
             .state();
 
-        assert_eq!(next_state, want_state);
-
         let d = std::time::Instant::now() - start;
         eprintln!("computed in {:?}", d);
+
+        assert_eq!(next_state, want_state);
     }
 }

@@ -1,7 +1,5 @@
-// common provides common type fo galaxy.
-// TODO: rename this file to galaxy.rs.
-
 extern crate wasm_bindgen;
+
 use anyhow::*;
 use std::{fmt::Formatter, str::FromStr};
 use wasm_bindgen::prelude::*;
@@ -20,10 +18,33 @@ pub struct InteractResult {
 }
 
 #[wasm_bindgen]
+pub struct Image {
+    img: Vec<Point>,
+}
+
+#[wasm_bindgen]
+impl Image {
+    pub fn count(&self) -> usize {
+        self.img.len()
+    }
+    pub fn point(&self, i: usize) -> Point {
+        self.img[i]
+    }
+}
+
+#[wasm_bindgen]
 impl InteractResult {
+    // TODO: String cannot be used as a return value due to
+    // https://github.com/rustwasm/wasm-bindgen/issues/2279.
+    #[cfg(target_arch = "wasm32")]
+    pub fn state(&self) -> JsValue {
+        JsValue::from_str(&self.state)
+    }
+    #[cfg(target_os = "linux")]
     pub fn state(&self) -> String {
         self.state.clone()
     }
+
     pub fn image_count(&self) -> usize {
         self.images.len()
     }
@@ -37,21 +58,6 @@ impl InteractResult {
                 })
                 .collect(),
         }
-    }
-}
-
-#[wasm_bindgen]
-pub struct Image {
-    img: Vec<Point>,
-}
-
-#[wasm_bindgen]
-impl Image {
-    pub fn count(&self) -> usize {
-        self.img.len()
-    }
-    pub fn point(&self, i: usize) -> Point {
-        self.img[i]
     }
 }
 
@@ -203,7 +209,7 @@ impl G {
         y: i32,
         api_key: &str,
     ) -> InteractResult {
-        let mut vector = format!("ap ap vec {} {}", x, y);
+        let vector = format!("ap ap vec {} {}", x, y);
         loop {
             let input = format!("ap ap {} {} {}", protocol, state, vector);
             let (flag, new_state, data) = {
@@ -234,8 +240,8 @@ impl G {
                     }
                 }
                 1 => {
-                    let next_data = send(&data, api_key);
-                    vector = format!("{}", next_data);
+                    // let next_data = send(&data, api_key);
+                    // vector = format!("{}", next_data);
                 }
                 _ => panic!("unexpected flag: {}", flag),
             }

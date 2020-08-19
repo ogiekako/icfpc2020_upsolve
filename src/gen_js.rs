@@ -1,4 +1,3 @@
-use crate::*;
 use anyhow::{anyhow, Result};
 use std::io::prelude::*;
 use std::{
@@ -7,6 +6,8 @@ use std::{
     str::FromStr,
 };
 use wasm_bindgen::prelude::*;
+
+use crate::*;
 
 pub struct GalaxyEvaluator {
     env: Env,
@@ -53,6 +54,7 @@ impl Env {
 
 #[cfg(target_os = "linux")]
 fn eval_js(prog: &str) -> Result<String> {
+    let prog = format!("(() => {{ {} }})()", prog);
     // for debug.
     let mut f = std::fs::File::create("/tmp/hoge.js")?;
     write!(f, "{}", prog).unwrap();
@@ -63,7 +65,7 @@ fn eval_js(prog: &str) -> Result<String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
-    p.stdin.unwrap().write_all(js.as_bytes())?;
+    p.stdin.unwrap().write_all(prog.as_bytes())?;
     let mut res = String::new();
     p.stdout.unwrap().read_to_string(&mut res)?;
     res = res.trim().into();
